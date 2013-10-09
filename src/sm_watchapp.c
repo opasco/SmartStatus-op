@@ -325,21 +325,12 @@ void select_up_handler(ClickRecognizerRef recognizer, Window *window) {
   (void)recognizer;
   (void)window;
 
-	//revert to showing the temperature 
-	layer_set_hidden(&text_weather_temp_layer.layer, false);
-	layer_set_hidden(&text_weather_cond_layer.layer, true);
-
 }
 
 
 void select_down_handler(ClickRecognizerRef recognizer, Window *window) {
   (void)recognizer;
   (void)window;
-
-	//show the weather condition instead of temperature while center button is pressed
-	layer_set_hidden(&text_weather_temp_layer.layer, true);
-	layer_set_hidden(&text_weather_cond_layer.layer, false);
-
 }
 
 
@@ -347,7 +338,14 @@ void up_single_click_handler(ClickRecognizerRef recognizer, Window *window) {
   (void)recognizer;
   (void)window;
 
-	sendCommand(SM_NEXT_TRACK_KEY);
+	sendCommand(SM_VOLUME_UP_KEY);
+}
+
+void down_single_click_handler(ClickRecognizerRef recognizer, Window *window) {
+  (void)recognizer;
+  (void)window;
+
+	sendCommand(SM_VOLUME_DOWN_KEY);
 }
 
 void swap_bottom_layer() {
@@ -362,13 +360,6 @@ void swap_bottom_layer() {
 
 	property_animation_init_layer_frame(&ani_in, &animated_layer[active_layer], &GRect(144, 79, 75, 40), &GRect(30, 79, 75, 40));
 	animation_schedule(&(ani_in.animation));
-}
-
-void down_single_click_handler(ClickRecognizerRef recognizer, Window *window) {
-  (void)recognizer;
-  (void)window;
-
-	sendCommand(SM_PREVIOUS_TRACK_KEY);
 }
 
 
@@ -410,11 +401,19 @@ void battery_layer_update_callback(Layer *me, GContext* ctx) {
 
 void handle_status_appear(Window *window)
 {
+	text_layer_set_text(&text_status_layer, "Hello");
+	
 	sendCommandInt(SM_SCREEN_ENTER_KEY, STATUS_SCREEN_APP);
+
+	// Start UI timers	
+	timerSwapBottomLayer = app_timer_send_event(g_app_context, SWAP_BOTTOM_LAYER_INTERVAL, 4);
+	timerUpdateGps = app_timer_send_event(g_app_context, GPS_UPDATE_INTERVAL, 6);
 }
 
 void handle_status_disappear(Window *window)
 {
+	text_layer_set_text(&text_status_layer, "Bye");
+	
 	sendCommandInt(SM_SCREEN_EXIT_KEY, STATUS_SCREEN_APP);
 	
 	app_timer_cancel_event(g_app_context, timerUpdateCalendar);
@@ -445,6 +444,7 @@ void handle_init(AppContextRef ctx) {
 
 	window_stack_push(&window, true /* Animated */);
 	window_set_fullscreen(&window, true);
+	window_set_background_color(&window, GColorBlack);
 
 	resource_init_current_app(&APP_RESOURCES);
 
@@ -460,7 +460,7 @@ void handle_init(AppContextRef ctx) {
 
 	//init background image
 	bitmap_layer_init(&background_image, GRect(0, 0, 144, 168));
-	layer_add_child(&window.layer, &background_image.layer);
+//	layer_add_child(&window.layer, &background_image.layer);
 	bitmap_layer_set_bitmap(&background_image, &bg_image.bmp);
 
 	// init battery layer
@@ -608,7 +608,7 @@ void handle_init(AppContextRef ctx) {
 	
 	
 	//init location layer
-	layer_init(&animated_layer[LOCATION_LAYER], GRect(144, 798, 75, 47));
+	layer_init(&animated_layer[LOCATION_LAYER], GRect(144, 79, 75, 47));
 	layer_add_child(&window.layer, &animated_layer[LOCATION_LAYER]);
 	
 	text_layer_init(&location_street_layer, GRect(0, 0, 75, 47));
@@ -624,11 +624,9 @@ void handle_init(AppContextRef ctx) {
 
 	active_layer = MUSIC_LAYER;
 	
-	timerSwapBottomLayer = app_timer_send_event(g_app_context, SWAP_BOTTOM_LAYER_INTERVAL /* milliseconds */, 4);
+	//timerSwapBottomLayer = app_timer_send_event(g_app_context, SWAP_BOTTOM_LAYER_INTERVAL /* milliseconds */, 4);
 	timerUpdateWeatherForecast = app_timer_send_event(g_app_context, 5000 /* milliseconds */, 5);
-	timerUpdateGps = app_timer_send_event(g_app_context, GPS_UPDATE_INTERVAL /* milliseconds */, 6);
-
-	reset();
+	//timerUpdateGps = app_timer_send_event(g_app_context, GPS_UPDATE_INTERVAL /* milliseconds */, 6);
 }
 
 
