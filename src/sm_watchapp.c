@@ -61,6 +61,7 @@ static BitmapLayer background_image, weather_image, weather_tomorrow_image, batt
 
 static int active_layer;
 static int connected = 0;
+static int disconnected = 0;
 
 static char string_buffer[STRING_LENGTH], location_street_str[STRING_LENGTH];
 static char weather_cond_str[STRING_LENGTH], weather_tomorrow_temp_str[STRING_LENGTH], weather_temp_str[5];
@@ -687,13 +688,16 @@ void handle_timer(AppContextRef ctx, AppTimerHandle handle, uint32_t cookie) {
 		if(connected == 0) {
 			text_layer_set_text(&text_status_layer, "Disc.");
 			vibes_long_pulse();
+			disconnected = 1;
 		}
 	}
 	
 	if (cookie != 4) {
-		text_layer_set_text(&text_status_layer, "Req.");
-		connected = 0;
-		timerDisconnectWarning = app_timer_send_event(g_app_context, DISCONNECT_WARNING_INTERVAL, 7);
+		if(disconnected == 0) {
+			text_layer_set_text(&text_status_layer, "Req.");
+			connected = 0;
+			timerDisconnectWarning = app_timer_send_event(g_app_context, DISCONNECT_WARNING_INTERVAL, 7);
+		}
 	}
 
 	if (cookie == 1) {
