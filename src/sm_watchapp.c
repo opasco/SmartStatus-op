@@ -17,6 +17,7 @@ PBL_APP_INFO(MY_UUID,
 #define NUM_WEATHER_IMAGES	8
 #define SWAP_BOTTOM_LAYER_INTERVAL 15000
 #define GPS_UPDATE_INTERVAL 60000
+#define DISCONNECT_WARNING_INTERVAL 10000
 
 typedef enum {MUSIC_LAYER, LOCATION_LAYER, NUM_LAYERS} AnimatedLayers;
 
@@ -79,6 +80,7 @@ static AppTimerHandle timerUpdateMusic = 0;
 static AppTimerHandle timerSwapBottomLayer = 0;
 static AppTimerHandle timerUpdateWeatherForecast = 0;
 static AppTimerHandle timerUpdateGps = 0;
+static AppTimerHandle timerDisconnectWarning = 0;
 
 /*
 const int WEATHER_IMG_IDS[] = {
@@ -192,7 +194,8 @@ void rcv(DictionaryIterator *received, void *context) {
 	Tuple *t;
 
 	text_layer_set_text(&text_status_layer, "Ok");
-	connected =1;
+	connected = 1;
+	app_timer_cancel_event(g_app_context, timerDisconnectWarning);
 
 	t=dict_find(received, SM_WEATHER_COND_KEY); 
 	if (t!=NULL) {
@@ -455,14 +458,6 @@ void handle_init(AppContextRef ctx) {
 		heap_bitmap_init(&weather_status_small_imgs[i], WEATHER_SMALL_IMG_IDS[i]);
 	}
 	
-	heap_bitmap_init(&bg_image, RESOURCE_ID_IMAGE_BACKGROUND);
-
-
-	//init background image
-	bitmap_layer_init(&background_image, GRect(0, 0, 144, 168));
-//	layer_add_child(&window.layer, &background_image.layer);
-	bitmap_layer_set_bitmap(&background_image, &bg_image.bmp);
-
 	// init battery layer
 	layer_init(&battery_layer, GRect(95, 45, 49, 45));
 	layer_add_child(&window.layer, &battery_layer);
@@ -688,9 +683,17 @@ void handle_timer(AppContextRef ctx, AppTimerHandle handle, uint32_t cookie) {
 
 /* Request new data from the phone once the timers expire */
 
+	if (cookie == 7) {
+		if(connected == 0) {
+			text_layer_set_text(&text_status_layer, "Disc.");
+			vibes_long_pulse();
+		}
+	}
+	
 	if (cookie != 4) {
 		text_layer_set_text(&text_status_layer, "Req.");
-		connected =0;
+		connected = 0;
+		timerDisconnectWarning = app_timer_send_event(g_app_context, DISCONNECT_WARNING_INTERVAL, 7);
 	}
 
 	if (cookie == 1) {

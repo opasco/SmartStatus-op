@@ -60,11 +60,6 @@
             "defName": "IMAGE_BATTERY",
             "type": "png",
             "file": "images/battery.png"
-        },
-        {
-            "defName": "IMAGE_BACKGROUND",
-            "type": "png",
-            "file": "images/background.png"
         }
     ],
     "friendlyVersion": "VERSION",
