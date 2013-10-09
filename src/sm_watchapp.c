@@ -63,7 +63,7 @@ static int active_layer;
 static int connected = 0;
 static int disconnected = 0;
 
-static char string_buffer[STRING_LENGTH], location_street_str[STRING_LENGTH];
+static char string_buffer[STRING_LENGTH], location_street_str[STRING_LENGTH], appointment_time[15];
 static char weather_cond_str[STRING_LENGTH], weather_tomorrow_temp_str[STRING_LENGTH], weather_temp_str[5];
 static int weather_img, weather_tomorrow_img, batteryPercent;
 
@@ -255,6 +255,7 @@ void rcv(DictionaryIterator *received, void *context) {
 		memcpy(calendar_date_str, t->value->cstring, strlen(t->value->cstring));
         calendar_date_str[strlen(t->value->cstring)] = '\0';
 		text_layer_set_text(&calendar_date_layer, calendar_date_str); 	
+		strncpy(appointment_time, calendar_date_str, 11);
 	}
 
 	t=dict_find(received, SM_STATUS_CAL_TEXT_KEY); 
@@ -633,6 +634,7 @@ void handle_minute_tick(AppContextRef ctx, PebbleTickEvent *t) {
 
   static char time_text[] = "00:00";
   static char date_text[] = "Xxxxxxxxx 00";
+	static char date_time_for_appt[] = "00/00 00:00";
 
   char *time_format;
 
@@ -654,6 +656,11 @@ void handle_minute_tick(AppContextRef ctx, PebbleTickEvent *t) {
 
   text_layer_set_text(&text_time_layer, time_text);
 	
+	// Check if appointment starts
+	string_format_time(date_time_for_appt, sizeof(date_time_for_appt), "%m/%d %H:%M", t->tick_time);
+	if(strcmp(appointment_time, date_time_for_appt) == 0) {
+		vibes_double_pulse();
+	}
 	// Check timers status
 	if(timerSwapBottomLayer == 0) {
 		timerSwapBottomLayer = app_timer_send_event(g_app_context, SWAP_BOTTOM_LAYER_INTERVAL, 4);
