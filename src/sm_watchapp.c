@@ -17,7 +17,7 @@ PBL_APP_INFO(MY_UUID,
 #define NUM_WEATHER_IMAGES	8
 #define SWAP_BOTTOM_LAYER_INTERVAL 15000
 #define GPS_UPDATE_INTERVAL 60000
-#define DISCONNECT_WARNING_INTERVAL 10000
+#define RECOVERY_ATTEMPT_INTERVAL 10000
 
 typedef enum {MUSIC_LAYER, LOCATION_LAYER, NUM_LAYERS} AnimatedLayers;
 
@@ -61,7 +61,6 @@ static BitmapLayer background_image, weather_image, weather_tomorrow_image, batt
 
 static int active_layer;
 static int connected = 0;
-static int disconnected = 0;
 
 static char string_buffer[STRING_LENGTH], location_street_str[STRING_LENGTH], appointment_time[15];
 static char weather_cond_str[STRING_LENGTH], weather_tomorrow_temp_str[STRING_LENGTH], weather_temp_str[5];
@@ -71,8 +70,7 @@ static char calendar_date_str[STRING_LENGTH], calendar_text_str[STRING_LENGTH];
 static char music_artist_str[STRING_LENGTH], music_title_str[STRING_LENGTH];
 
 
-HeapBitmap bg_image, battery_image;
-HeapBitmap weather_status_imgs[NUM_WEATHER_IMAGES];
+HeapBitmap battery_image;
 HeapBitmap weather_status_small_imgs[NUM_WEATHER_IMAGES];
 
 static AppTimerHandle timerUpdateCalendar = 0;
@@ -81,20 +79,7 @@ static AppTimerHandle timerUpdateMusic = 0;
 static AppTimerHandle timerSwapBottomLayer = 0;
 static AppTimerHandle timerUpdateWeatherForecast = 0;
 static AppTimerHandle timerUpdateGps = 0;
-static AppTimerHandle timerDisconnectWarning = 0;
-
-/*
-const int WEATHER_IMG_IDS[] = {
-  RESOURCE_ID_IMAGE_SUN,
-  RESOURCE_ID_IMAGE_RAIN,
-  RESOURCE_ID_IMAGE_CLOUD,
-  RESOURCE_ID_IMAGE_SUN_CLOUD,
-  RESOURCE_ID_IMAGE_FOG,
-  RESOURCE_ID_IMAGE_WIND,
-  RESOURCE_ID_IMAGE_SNOW,
-  RESOURCE_ID_IMAGE_THUNDER
-};
-*/
+static AppTimerHandle timerRecoveryAttempt = 0;
 
 const int WEATHER_SMALL_IMG_IDS[] = {
   RESOURCE_ID_IMAGE_SUN_SMALL,
@@ -193,10 +178,8 @@ void sendCommandInt(int key, int param) {
 void rcv(DictionaryIterator *received, void *context) {
 	// Got a message callback
 	Tuple *t;
-
-	text_layer_set_text(&text_status_layer, "Ok");
+	
 	connected = 1;
-	app_timer_cancel_event(g_app_context, timerDisconnectWarning);
 
 	t=dict_find(received, SM_WEATHER_COND_KEY); 
 	if (t!=NULL) {
@@ -308,8 +291,53 @@ void rcv(DictionaryIterator *received, void *context) {
 
 void dropped(void *context, AppMessageResult reason){
 	// DO SOMETHING WITH THE DROPPED REASON / DISPLAY AN ERROR / RESEND 
+	text_layer_set_text(&text_status_layer, "Drop.");
+	
+	if(reason == APP_MSG_BUSY) {
+		text_layer_set_text(&text_status_layer, ">Busy");
+	}
+	
+	if(reason == APP_MSG_BUFFER_OVERFLOW) {
+		text_layer_set_text(&text_status_layer, "Over.");
+	}
+	
+	if(connected != 0)
+		vibes_long_pulse();
+
+	connected = 0;
+	timerRecoveryAttempt = app_timer_send_event(g_app_context, RECOVERY_ATTEMPT_INTERVAL, 7);
 }
 
+void sent_ok(DictionaryIterator *sent, void *context) {
+	text_layer_set_text(&text_status_layer, "Ok");
+	connected = 1;
+}
+
+void send_failed(DictionaryIterator *failed, AppMessageResult reason, void *context) {
+	text_layer_set_text(&text_status_layer, "Err.");
+	
+	if(reason == APP_MSG_NOT_CONNECTED) {
+		text_layer_set_text(&text_status_layer, "Disc.");
+	}
+	
+	if(reason == APP_MSG_SEND_TIMEOUT) {
+		text_layer_set_text(&text_status_layer, "T.Out");
+	}
+	
+	if(reason == APP_MSG_BUSY) {
+		text_layer_set_text(&text_status_layer, "<Busy");
+	}
+	
+	if(reason == APP_MSG_SEND_REJECTED) {
+		text_layer_set_text(&text_status_layer, "Nack");
+	}
+	
+	if(connected != 0)
+		vibes_long_pulse();
+
+	connected = 0;
+	timerRecoveryAttempt = app_timer_send_event(g_app_context, RECOVERY_ATTEMPT_INTERVAL, 7);
+}
 
 
 void select_single_click_handler(ClickRecognizerRef recognizer, Window *window) {
@@ -356,14 +384,14 @@ void down_single_click_handler(ClickRecognizerRef recognizer, Window *window) {
 void swap_bottom_layer() {
 	//on a press of the bottom button, scroll in the next layer
 
-	property_animation_init_layer_frame(&ani_out, &animated_layer[active_layer], &GRect(30, 79, 75, 40), &GRect(-75, 79, 75, 40));
+	property_animation_init_layer_frame(&ani_out, &animated_layer[active_layer], &GRect(30, 72, 75, 50), &GRect(-75, 72, 75, 50));
 	animation_schedule(&(ani_out.animation));
 
 
 	active_layer = (active_layer + 1) % (NUM_LAYERS);
 
 
-	property_animation_init_layer_frame(&ani_in, &animated_layer[active_layer], &GRect(144, 79, 75, 40), &GRect(30, 79, 75, 40));
+	property_animation_init_layer_frame(&ani_in, &animated_layer[active_layer], &GRect(144, 72, 75, 50), &GRect(30, 72, 75, 50));
 	animation_schedule(&(ani_in.animation));
 }
 
@@ -428,14 +456,6 @@ void handle_status_disappear(Window *window)
 	app_timer_cancel_event(g_app_context, timerUpdateGps);
 }
 
-void reset() {
-	
-	layer_set_hidden(&text_weather_temp_layer.layer, true);
-	layer_set_hidden(&text_weather_cond_layer.layer, false);
-	text_layer_set_text(&text_weather_cond_layer, "Updating..."); 	
-	
-}
-
 void handle_init(AppContextRef ctx) {
 	(void)ctx;
 
@@ -456,7 +476,6 @@ void handle_init(AppContextRef ctx) {
 
 	//init weather images
 	for (int i=0; i<NUM_WEATHER_IMAGES; i++) {
-		//heap_bitmap_init(&weather_status_imgs[i], WEATHER_IMG_IDS[i]);
 		heap_bitmap_init(&weather_status_small_imgs[i], WEATHER_SMALL_IMG_IDS[i]);
 	}
 	
@@ -550,7 +569,7 @@ void handle_init(AppContextRef ctx) {
 	text_layer_set_font(&text_time_layer, fonts_load_custom_font(resource_get_handle(RESOURCE_ID_FONT_ROBOTO_BOLD_SUBSET_49)));
 	layer_add_child(&window.layer, &text_time_layer.layer);
 
-	text_layer_init(&text_status_layer, GRect(52, 53, 45, 20));
+	text_layer_init(&text_status_layer, GRect(52, 51, 45, 20));
 	text_layer_set_text_alignment(&text_status_layer, GTextAlignmentCenter);
 	text_layer_set_text_color(&text_status_layer, GColorWhite);
 	text_layer_set_background_color(&text_status_layer, GColorClear);
@@ -583,11 +602,11 @@ void handle_init(AppContextRef ctx) {
 	
 	
 	//init music layer
-	layer_init(&animated_layer[MUSIC_LAYER], GRect(30, 79, 75, 40));
+	layer_init(&animated_layer[MUSIC_LAYER], GRect(30, 72, 75, 50));
 	layer_add_child(&window.layer, &animated_layer[MUSIC_LAYER]);
 	
 	text_layer_init(&music_artist_layer, GRect(0, 0, 75, 20));
-	text_layer_set_text_alignment(&music_artist_layer, GTextAlignmentLeft);
+	text_layer_set_text_alignment(&music_artist_layer, GTextAlignmentCenter);
 	text_layer_set_text_color(&music_artist_layer, GColorWhite);
 	text_layer_set_background_color(&music_artist_layer, GColorClear);
 	text_layer_set_font(&music_artist_layer, fonts_get_system_font(FONT_KEY_GOTHIC_14));
@@ -596,7 +615,7 @@ void handle_init(AppContextRef ctx) {
 
 
 	text_layer_init(&music_song_layer, GRect(0, 21, 75, 20));
-	text_layer_set_text_alignment(&music_song_layer, GTextAlignmentLeft);
+	text_layer_set_text_alignment(&music_song_layer, GTextAlignmentCenter);
 	text_layer_set_text_color(&music_song_layer, GColorWhite);
 	text_layer_set_background_color(&music_song_layer, GColorClear);
 	text_layer_set_font(&music_song_layer, fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD));
@@ -605,7 +624,7 @@ void handle_init(AppContextRef ctx) {
 	
 	
 	//init location layer
-	layer_init(&animated_layer[LOCATION_LAYER], GRect(144, 79, 75, 47));
+	layer_init(&animated_layer[LOCATION_LAYER], GRect(144, 72, 75, 50));
 	layer_add_child(&window.layer, &animated_layer[LOCATION_LAYER]);
 	
 	text_layer_init(&location_street_layer, GRect(0, 0, 75, 47));
@@ -614,16 +633,14 @@ void handle_init(AppContextRef ctx) {
 	text_layer_set_background_color(&location_street_layer, GColorClear);
 	text_layer_set_font(&location_street_layer, fonts_get_system_font(FONT_KEY_GOTHIC_14));
 	layer_add_child(&animated_layer[LOCATION_LAYER], &location_street_layer.layer);
-	text_layer_set_text(&location_street_layer, "Unknown Location"); 	
+	text_layer_set_text(&location_street_layer, "Location not updated"); 	
 
 
 	window_set_click_config_provider(&window, (ClickConfigProvider) config_provider);
 
 	active_layer = MUSIC_LAYER;
 	
-	//timerSwapBottomLayer = app_timer_send_event(g_app_context, SWAP_BOTTOM_LAYER_INTERVAL /* milliseconds */, 4);
 	timerUpdateWeatherForecast = app_timer_send_event(g_app_context, 5000 /* milliseconds */, 5);
-	//timerUpdateGps = app_timer_send_event(g_app_context, GPS_UPDATE_INTERVAL /* milliseconds */, 6);
 }
 
 
@@ -661,6 +678,7 @@ void handle_minute_tick(AppContextRef ctx, PebbleTickEvent *t) {
 	if(strcmp(appointment_time, date_time_for_appt) == 0) {
 		vibes_double_pulse();
 	}
+	
 	// Check timers status
 	if(timerSwapBottomLayer == 0) {
 		timerSwapBottomLayer = app_timer_send_event(g_app_context, SWAP_BOTTOM_LAYER_INTERVAL, 4);
@@ -675,13 +693,8 @@ void handle_deinit(AppContextRef ctx) {
   (void)ctx;
 
 	for (int i=0; i<NUM_WEATHER_IMAGES; i++) {
-	  	heap_bitmap_deinit(&weather_status_imgs[i]);
 	  	heap_bitmap_deinit(&weather_status_small_imgs[i]);
 	}
-
-  	heap_bitmap_deinit(&bg_image);
-
-	
 }
 
 
@@ -690,23 +703,6 @@ void handle_timer(AppContextRef ctx, AppTimerHandle handle, uint32_t cookie) {
   (void)handle;
 
 /* Request new data from the phone once the timers expire */
-
-	if (cookie == 7) {
-		if(connected == 0) {
-			text_layer_set_text(&text_status_layer, "Disc.");
-			vibes_long_pulse();
-			disconnected = 1;
-		}
-	}
-	
-	if (cookie != 4) {
-		if(disconnected == 0) {
-			text_layer_set_text(&text_status_layer, "Req.");
-			connected = 0;
-			timerDisconnectWarning = app_timer_send_event(g_app_context, DISCONNECT_WARNING_INTERVAL, 7);
-		}
-	}
-
 	if (cookie == 1) {
 		sendCommandInt(SM_SCREEN_EXIT_KEY, STATUS_SCREEN_APP);
 		sendCommandInt(SM_SCREEN_ENTER_KEY, WEATHER_APP);
@@ -748,6 +744,10 @@ void handle_timer(AppContextRef ctx, AppTimerHandle handle, uint32_t cookie) {
 
 		timerUpdateGps = app_timer_send_event(g_app_context, GPS_UPDATE_INTERVAL, 6);
 	}
+	
+	if (cookie == 7) {
+		sendCommandInt(SM_SCREEN_ENTER_KEY, STATUS_SCREEN_APP);
+	}
 }
 
 void pbl_main(void *params) {
@@ -761,6 +761,8 @@ void pbl_main(void *params) {
 			.outbound = 256
 		},
 		.default_callbacks.callbacks = {
+			.out_sent = sent_ok,
+			.out_failed = send_failed,
 			.in_received = rcv,
 			.in_dropped = dropped
 		}
