@@ -115,7 +115,7 @@ void reset_sequence_number() {
     app_message_out_release();
 }
 
-
+/*
 char* int_to_str(int num, char *outbuf) {
 	int digit, i=0, j=0;
 	char buf[STRING_LENGTH];
@@ -151,7 +151,7 @@ char* int_to_str(int num, char *outbuf) {
 	
 	return outbuf;
 }
-
+*/
 
 void sendCommand(int key) {
 	DictionaryIterator* iterout;
@@ -178,6 +178,7 @@ void sendCommandInt(int key, int param) {
 void rcv(DictionaryIterator *received, void *context) {
 	// Got a message callback
 	Tuple *t;
+	int interval;
 	
 	connected = 1;
 
@@ -193,10 +194,6 @@ void rcv(DictionaryIterator *received, void *context) {
 		memcpy(weather_temp_str, t->value->cstring, strlen(t->value->cstring));
         weather_temp_str[strlen(t->value->cstring)] = '\0';
 		text_layer_set_text(&text_weather_temp_layer, weather_temp_str); 
-		
-		layer_set_hidden(&text_weather_cond_layer.layer, true);
-		layer_set_hidden(&text_weather_temp_layer.layer, false);
-			
 	}
 
 	t=dict_find(received, SM_WEATHER_ICON_KEY); 
@@ -218,8 +215,6 @@ void rcv(DictionaryIterator *received, void *context) {
 
 	t=dict_find(received, SM_GPS_1_KEY); 
 	if (t!=NULL) {
-		text_layer_set_text(&location_street_layer, "Reading Location");
-
 		memcpy(location_street_str, t->value->cstring, strlen(t->value->cstring));
         location_street_str[strlen(t->value->cstring)] = '\0';
 		text_layer_set_text(&location_street_layer, location_street_str); 	
@@ -230,7 +225,6 @@ void rcv(DictionaryIterator *received, void *context) {
 	if (t!=NULL) {
 		batteryPercent = t->value->uint8;
 		layer_mark_dirty(&battery_ind_layer);
-		text_layer_set_text(&text_battery_layer, int_to_str(batteryPercent, string_buffer) ); 	
 	}
 
 	t=dict_find(received, SM_STATUS_CAL_TIME_KEY); 
@@ -265,7 +259,7 @@ void rcv(DictionaryIterator *received, void *context) {
 
 	t=dict_find(received, SM_STATUS_UPD_WEATHER_KEY); 
 	if (t!=NULL) {
-		int interval = t->value->int32 * 1000;
+		interval = t->value->int32 * 1000;
 
 		app_timer_cancel_event(g_app_context, timerUpdateWeather);
 		timerUpdateWeather = app_timer_send_event(g_app_context, interval /* milliseconds */, 1);
@@ -273,7 +267,7 @@ void rcv(DictionaryIterator *received, void *context) {
 
 	t=dict_find(received, SM_STATUS_UPD_CAL_KEY); 
 	if (t!=NULL) {
-		int interval = t->value->int32 * 1000;
+		interval = t->value->int32 * 1000;
 
 		app_timer_cancel_event(g_app_context, timerUpdateCalendar);
 		timerUpdateCalendar = app_timer_send_event(g_app_context, interval /* milliseconds */, 2);
@@ -281,7 +275,7 @@ void rcv(DictionaryIterator *received, void *context) {
 
 	t=dict_find(received, SM_SONG_LENGTH_KEY); 
 	if (t!=NULL) {
-		int interval = t->value->int32 * 1000;
+		interval = t->value->int32 * 1000;
 
 		app_timer_cancel_event(g_app_context, timerUpdateMusic);
 		timerUpdateMusic = app_timer_send_event(g_app_context, interval /* milliseconds */, 3);
@@ -301,9 +295,6 @@ void dropped(void *context, AppMessageResult reason){
 		text_layer_set_text(&text_status_layer, "Over.");
 	}
 	
-	if(connected != 0)
-		vibes_long_pulse();
-
 	connected = 0;
 	timerRecoveryAttempt = app_timer_send_event(g_app_context, RECOVERY_ATTEMPT_INTERVAL, 7);
 }
@@ -332,9 +323,6 @@ void send_failed(DictionaryIterator *failed, AppMessageResult reason, void *cont
 		text_layer_set_text(&text_status_layer, "Nack");
 	}
 	
-	if(connected != 0)
-		vibes_long_pulse();
-
 	connected = 0;
 	timerRecoveryAttempt = app_timer_send_event(g_app_context, RECOVERY_ATTEMPT_INTERVAL, 7);
 }
@@ -489,16 +477,6 @@ void handle_init(AppContextRef ctx) {
 	layer_add_child(&battery_layer, &battery_image_layer.layer);
 	bitmap_layer_set_bitmap(&battery_image_layer, &battery_image.bmp);
 
-
-	text_layer_init(&text_battery_layer, GRect(4, 20, 40, 60));
-	text_layer_set_text_alignment(&text_battery_layer, GTextAlignmentCenter);
-	text_layer_set_text_color(&text_battery_layer, GColorWhite);
-	text_layer_set_background_color(&text_battery_layer, GColorClear);
-	text_layer_set_font(&text_battery_layer,  fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD));
-	// layer_add_child(&battery_layer, &text_battery_layer.layer);
-	text_layer_set_text(&text_battery_layer, "-");
-
-
 	layer_init(&battery_ind_layer, GRect(14, 9, 19, 11));
 	battery_ind_layer.update_proc = &battery_layer_update_callback;
 	layer_add_child(&battery_layer, &battery_ind_layer);
@@ -510,17 +488,6 @@ void handle_init(AppContextRef ctx) {
 	layer_init(&weather_layer, GRect(0, 78, 144, 45));
 	layer_add_child(&window.layer, &weather_layer);
 
-
-	text_layer_init(&text_weather_cond_layer, GRect(48, 1, 48, 40)); // GRect(5, 2, 47, 40)
-	text_layer_set_text_alignment(&text_weather_cond_layer, GTextAlignmentCenter);
-	text_layer_set_text_color(&text_weather_cond_layer, GColorWhite);
-	text_layer_set_background_color(&text_weather_cond_layer, GColorClear);
-	text_layer_set_font(&text_weather_cond_layer, fonts_get_system_font(FONT_KEY_GOTHIC_18));
-//	layer_add_child(&weather_layer, &text_weather_cond_layer.layer);
-
-	layer_set_hidden(&text_weather_cond_layer.layer, false);
-	text_layer_set_text(&text_weather_cond_layer, "Updating..."); 	
-	
 
 	weather_img = 0;
 
@@ -678,15 +645,6 @@ void handle_minute_tick(AppContextRef ctx, PebbleTickEvent *t) {
 	if(strcmp(appointment_time, date_time_for_appt) == 0) {
 		vibes_double_pulse();
 	}
-	
-	// Check timers status
-	if(timerSwapBottomLayer == 0) {
-		timerSwapBottomLayer = app_timer_send_event(g_app_context, SWAP_BOTTOM_LAYER_INTERVAL, 4);
-	}
-
-	if(timerUpdateGps == 0) {
-		timerUpdateGps = app_timer_send_event(g_app_context, GPS_UPDATE_INTERVAL, 6);
-	}
 }
 
 void handle_deinit(AppContextRef ctx) {
@@ -720,9 +678,6 @@ void handle_timer(AppContextRef ctx, AppTimerHandle handle, uint32_t cookie) {
 	}
 
 	if (cookie == 4) {
-		app_timer_cancel_event(g_app_context, timerSwapBottomLayer);
-		timerSwapBottomLayer = 0;
-		
 		swap_bottom_layer();	
 
 		timerSwapBottomLayer = app_timer_send_event(g_app_context, SWAP_BOTTOM_LAYER_INTERVAL, 4);
@@ -758,7 +713,7 @@ void pbl_main(void *params) {
 	.messaging_info = {
 		.buffer_sizes = {
 			.inbound = 124,
-			.outbound = 256
+			.outbound = 32
 		},
 		.default_callbacks.callbacks = {
 			.out_sent = sent_ok,
