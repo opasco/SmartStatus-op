@@ -427,7 +427,7 @@ void handle_status_appear(Window *window)
 	sendCommandInt(SM_SCREEN_ENTER_KEY, STATUS_SCREEN_APP);
 
 	// Start UI timers	
-	timerSwapBottomLayer = app_timer_send_event(g_app_context, SWAP_BOTTOM_LAYER_INTERVAL, 4);
+	//timerSwapBottomLayer = app_timer_send_event(g_app_context, SWAP_BOTTOM_LAYER_INTERVAL, 4);
 	timerUpdateGps = app_timer_send_event(g_app_context, GPS_UPDATE_INTERVAL, 6);
 }
 
@@ -569,7 +569,7 @@ void handle_init(AppContextRef ctx) {
 	
 	
 	//init music layer
-	layer_init(&animated_layer[MUSIC_LAYER], GRect(30, 72, 75, 50));
+	layer_init(&animated_layer[MUSIC_LAYER], GRect(144, 72, 75, 50));
 	layer_add_child(&window.layer, &animated_layer[MUSIC_LAYER]);
 	
 	text_layer_init(&music_artist_layer, GRect(0, 0, 75, 20));
@@ -591,7 +591,7 @@ void handle_init(AppContextRef ctx) {
 	
 	
 	//init location layer
-	layer_init(&animated_layer[LOCATION_LAYER], GRect(144, 72, 75, 50));
+	layer_init(&animated_layer[LOCATION_LAYER], GRect(30, 72, 75, 50));
 	layer_add_child(&window.layer, &animated_layer[LOCATION_LAYER]);
 	
 	text_layer_init(&location_street_layer, GRect(0, 0, 75, 47));
@@ -605,7 +605,7 @@ void handle_init(AppContextRef ctx) {
 
 	window_set_click_config_provider(&window, (ClickConfigProvider) config_provider);
 
-	active_layer = MUSIC_LAYER;
+	active_layer = LOCATION_LAYER;
 	
 	timerUpdateWeatherForecast = app_timer_send_event(g_app_context, 5000 /* milliseconds */, 5);
 }
