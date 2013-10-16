@@ -24,7 +24,7 @@ typedef enum {MUSIC_LAYER, LOCATION_LAYER, NUM_LAYERS} AnimatedLayers;
 
 AppMessageResult sm_message_out_get(DictionaryIterator **iter_out);
 void reset_sequence_number();
-char* int_to_str(int num, char *outbuf);
+// char* int_to_str(int num, char *outbuf);
 void sendCommand(int key);
 void sendCommandInt(int key, int param);
 void rcv(DictionaryIterator *received, void *context);
@@ -59,12 +59,12 @@ static TextLayer music_artist_layer, music_song_layer, location_street_layer;
  
 static BitmapLayer background_image, weather_image, weather_tomorrow_image, battery_image_layer;
 
-static int active_layer;
-static int connected = 0;
+static int32_t active_layer;
+static bool connected = 0;
 
 static char string_buffer[STRING_LENGTH], location_street_str[STRING_LENGTH], appointment_time[15];
 static char weather_cond_str[STRING_LENGTH], weather_tomorrow_temp_str[STRING_LENGTH], weather_temp_str[5];
-static int weather_img, weather_tomorrow_img, batteryPercent;
+static int32_t weather_img, weather_tomorrow_img, batteryPercent;
 
 static char calendar_date_str[STRING_LENGTH], calendar_text_str[STRING_LENGTH];
 static char music_artist_str[STRING_LENGTH], music_title_str[STRING_LENGTH];
@@ -96,6 +96,51 @@ const int WEATHER_SMALL_IMG_IDS[] = {
 
 static uint32_t s_sequence_number = 0xFFFFFFFE;
 
+/* Convert letter to digit */
+int letter2digit(char letter) {
+	if((letter >= 48) && (letter <=57)) {
+		return letter - 48;
+	}
+	
+	return -1;
+}
+
+/* Convert string to number */
+int string2number(char *string) {
+	int32_t result = 0;
+	int32_t offset = strlen(string) - 1;
+	int32_t digit = -1;
+	int32_t unit = 1;
+	int8_t letter;	
+
+	for(unit = 1; offset >= 0; unit = unit * 10) {
+		letter = string[offset];
+		digit = letter2digit(letter);
+		if(digit == -1) return -1;
+		result = result + (unit * digit);
+		offset--;
+	}
+	
+	return result;
+}
+
+/* Convert time string ("HH:MM") to number of minutes */
+int timestr2minutes(char *timestr) {
+	static char hourStr[3], minStr[3];
+	int32_t hour, min;
+	
+	strncpy(hourStr, timestr, 2);
+	strncpy(minStr, timestr+3, 2);
+	
+	hour = string2number(hourStr);
+	if(hour == -1) return -1;
+	
+	min = string2number(minStr);
+	if(min == -1) return -1;
+	
+	return min + (hour * 60);
+}
+
 AppMessageResult sm_message_out_get(DictionaryIterator **iter_out) {
     AppMessageResult result = app_message_out_get(iter_out);
     if(result != APP_MSG_OK) return result;
@@ -115,43 +160,6 @@ void reset_sequence_number() {
     app_message_out_release();
 }
 
-/*
-char* int_to_str(int num, char *outbuf) {
-	int digit, i=0, j=0;
-	char buf[STRING_LENGTH];
-	bool negative=false;
-	
-	if (num < 0) {
-		negative = true;
-		num = -1 * num;
-	}
-	
-	for (i=0; i<STRING_LENGTH; i++) {
-		digit = num % 10;
-		if ((num==0) && (i>0)) 
-			break;
-		else
-			buf[i] = '0' + digit;
-		 
-		num/=10;
-	}
-	
-	if (negative)
-		buf[i++] = '-';
-	
-	buf[i--] = '\0';
-	
-	
-	while (i>=0) {
-		outbuf[j++] = buf[i--];
-	}
-
-	outbuf[j++] = '%';
-	outbuf[j] = '\0';
-	
-	return outbuf;
-}
-*/
 
 void sendCommand(int key) {
 	DictionaryIterator* iterout;
@@ -173,7 +181,6 @@ void sendCommandInt(int key, int param) {
 	app_message_out_send();
 	app_message_out_release();	
 }
-
 
 void rcv(DictionaryIterator *received, void *context) {
 	// Got a message callback
@@ -309,6 +316,9 @@ void send_failed(DictionaryIterator *failed, AppMessageResult reason, void *cont
 	
 	if(reason == APP_MSG_NOT_CONNECTED) {
 		text_layer_set_text(&text_status_layer, "Disc.");
+		if(connected == 1) {
+			vibes_double_pulse();
+		}
 	}
 	
 	if(reason == APP_MSG_SEND_TIMEOUT) {
@@ -427,7 +437,7 @@ void handle_status_appear(Window *window)
 	sendCommandInt(SM_SCREEN_ENTER_KEY, STATUS_SCREEN_APP);
 
 	// Start UI timers	
-	//timerSwapBottomLayer = app_timer_send_event(g_app_context, SWAP_BOTTOM_LAYER_INTERVAL, 4);
+	timerSwapBottomLayer = app_timer_send_event(g_app_context, SWAP_BOTTOM_LAYER_INTERVAL, 4);
 	timerUpdateGps = app_timer_send_event(g_app_context, GPS_UPDATE_INTERVAL, 6);
 }
 
@@ -447,7 +457,7 @@ void handle_status_disappear(Window *window)
 void handle_init(AppContextRef ctx) {
 	(void)ctx;
 
-  g_app_context = ctx;
+	g_app_context = ctx;
 
 	window_init(&window, "Window Name");
 	window_set_window_handlers(&window, (WindowHandlers) {
@@ -463,7 +473,7 @@ void handle_init(AppContextRef ctx) {
 
 
 	//init weather images
-	for (int i=0; i<NUM_WEATHER_IMAGES; i++) {
+	for (int8_t i=0; i<NUM_WEATHER_IMAGES; i++) {
 		heap_bitmap_init(&weather_status_small_imgs[i], WEATHER_SMALL_IMG_IDS[i]);
 	}
 	
@@ -614,43 +624,78 @@ void handle_init(AppContextRef ctx) {
 
 void handle_minute_tick(AppContextRef ctx, PebbleTickEvent *t) {
 /* Display the time */
-  (void)ctx;
+	(void)ctx;
 
-  static char time_text[] = "00:00";
-  static char date_text[] = "Xxxxxxxxx 00";
+  	static char time_text[] = "00:00";
+  	static char date_text[] = "Xxxxxxxxx 00";
 	static char date_time_for_appt[] = "00/00 00:00";
 
-  char *time_format;
+  	char *time_format;
+	
+	int32_t apptInMinutes, timeInMinutes;
 
-  string_format_time(date_text, sizeof(date_text), "%b %e", t->tick_time);
-  text_layer_set_text(&text_date_layer, date_text);
+  	string_format_time(date_text, sizeof(date_text), "%b %e", t->tick_time);
+  	text_layer_set_text(&text_date_layer, date_text);
 
 
-  if (clock_is_24h_style()) {
-    time_format = "%R";
-  } else {
-    time_format = "%I:%M";
-  }
+	if (clock_is_24h_style()) {
+    	time_format = "%R";
+	} else {
+    	time_format = "%I:%M";
+	}
 
-  string_format_time(time_text, sizeof(time_text), time_format, t->tick_time);
+	string_format_time(time_text, sizeof(time_text), time_format, t->tick_time);
 
-  if (!clock_is_24h_style() && (time_text[0] == '0')) {
-    memmove(time_text, &time_text[1], sizeof(time_text) - 1);
-  }
+  	if (!clock_is_24h_style() && (time_text[0] == '0')) {
+    	memmove(time_text, &time_text[1], sizeof(time_text) - 1);
+	}
 
-  text_layer_set_text(&text_time_layer, time_text);
+  	text_layer_set_text(&text_time_layer, time_text);
 	
 	// Check if appointment starts
-	string_format_time(date_time_for_appt, sizeof(date_time_for_appt), "%m/%d %H:%M", t->tick_time);
-	if(strcmp(appointment_time, date_time_for_appt) == 0) {
-		vibes_double_pulse();
+	//string_format_time(date_time_for_appt, sizeof(date_time_for_appt), "%m/%d %H:%M", t->tick_time);
+	//if(strcmp(appointment_time, date_time_for_appt) == 0) {
+	//	vibes_double_pulse();
+	//}
+	
+	/* Manage appoitment notification */
+	apptInMinutes = timestr2minutes(appointment_time + 6);
+	if(apptInMinutes >= 0) {
+		timeInMinutes = (t->tick_time->tm_hour * 60) + t->tick_time->tm_min;
+		if((apptInMinutes < timeInMinutes) && ((timeInMinutes - apptInMinutes) > 15)) {
+			layer_set_hidden(&calendar_layer, 1); 	
+		}
+		if((apptInMinutes < timeInMinutes) && ((timeInMinutes - apptInMinutes) <= 15)) {
+			snprintf(date_time_for_appt, 10, "%d min in", (int)(timeInMinutes - apptInMinutes));
+			text_layer_set_text(&calendar_date_layer, date_time_for_appt); 	
+			layer_set_hidden(&calendar_layer, 0);  	
+		}
+		if(apptInMinutes > timeInMinutes) {
+			if(((apptInMinutes - timeInMinutes) % 60) > 0) {
+				snprintf(date_time_for_appt, 11, "In %dh %dm", 
+						 (int)((apptInMinutes - timeInMinutes) / 60),
+						 (int)((apptInMinutes - timeInMinutes) % 60));
+			} else {
+				snprintf(date_time_for_appt, 11, "In %d min", (int)(apptInMinutes - timeInMinutes));
+			}
+			text_layer_set_text(&calendar_date_layer, date_time_for_appt); 	
+			layer_set_hidden(&calendar_layer, 0);  	
+		}
+		if(apptInMinutes == timeInMinutes) {
+			text_layer_set_text(&calendar_date_layer, "Now!"); 	
+			layer_set_hidden(&calendar_layer, 0);  	
+			vibes_double_pulse();
+		}
+		if((apptInMinutes >= timeInMinutes) && ((apptInMinutes - timeInMinutes) == 15)) {
+			vibes_short_pulse();
+		}
 	}
 }
 
 void handle_deinit(AppContextRef ctx) {
   (void)ctx;
 
-	for (int i=0; i<NUM_WEATHER_IMAGES; i++) {
+	for (int8_t i=0; i<NUM_WEATHER_IMAGES; i++) {
 	  	heap_bitmap_deinit(&weather_status_small_imgs[i]);
 	}
 }
