@@ -61,6 +61,7 @@ static BitmapLayer background_image, weather_image, weather_tomorrow_image, batt
 
 static int32_t active_layer;
 static bool connected = 0;
+static bool inGPSUpdate = 0;
 
 static char string_buffer[STRING_LENGTH], location_street_str[STRING_LENGTH], appointment_time[15];
 static char weather_cond_str[STRING_LENGTH], weather_tomorrow_temp_str[STRING_LENGTH], weather_temp_str[5];
@@ -226,6 +227,15 @@ void rcv(DictionaryIterator *received, void *context) {
         location_street_str[strlen(t->value->cstring)] = '\0';
 		text_layer_set_text(&location_street_layer, location_street_str); 	
 
+	}
+	t=dict_find(received, SM_UPDATE_INTERVAL_KEY); 
+	if (t!=NULL) {
+		if(inGPSUpdate == 1) {
+			interval = t->value->int32 * 1000;
+
+			app_timer_cancel_event(g_app_context, timerUpdateGps);
+			timerUpdateGps = app_timer_send_event(g_app_context, interval, 6);
+		}
 	}
 
 	t=dict_find(received, SM_COUNT_BATTERY_KEY); 
@@ -671,7 +681,7 @@ void handle_minute_tick(AppContextRef ctx, PebbleTickEvent *t) {
 			layer_set_hidden(&calendar_layer, 0);  	
 		}
 		if(apptInMinutes > timeInMinutes) {
-			if(((apptInMinutes - timeInMinutes) % 60) > 0) {
+			if(((apptInMinutes - timeInMinutes) / 60) > 0) {
 				snprintf(date_time_for_appt, 11, "In %dh %dm", 
 						 (int)((apptInMinutes - timeInMinutes) / 60),
 						 (int)((apptInMinutes - timeInMinutes) % 60));
@@ -739,10 +749,10 @@ void handle_timer(AppContextRef ctx, AppTimerHandle handle, uint32_t cookie) {
 		timerUpdateGps = 0;
 
 		sendCommandInt(SM_SCREEN_ENTER_KEY, GPS_APP);
+		inGPSUpdate = 1;
 		psleep(10);
 		sendCommandInt(SM_SCREEN_ENTER_KEY, STATUS_SCREEN_APP);
-
-		timerUpdateGps = app_timer_send_event(g_app_context, GPS_UPDATE_INTERVAL, 6);
+		inGPSUpdate = 0;
 	}
 	
 	if (cookie == 7) {
