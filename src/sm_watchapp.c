@@ -18,6 +18,15 @@ PBL_APP_INFO(MY_UUID,
 #define SWAP_BOTTOM_LAYER_INTERVAL 15000
 #define GPS_UPDATE_INTERVAL 60000
 #define RECOVERY_ATTEMPT_INTERVAL 10000
+#define DEFAULT_SONG_UPDATE_INTERVAL 5000
+
+#define TIMER_COOKIE_WEATHER 1
+#define TIMER_COOKIE_CALANDAR 2
+#define TIMER_COOKIE_MUSIC 3
+#define TIMER_COOKIE_LAYERSWAP 4
+#define TIMER_COOKIE_NEXTDAYWEATHER 5
+#define TIMER_COOKIE_GPS 6
+#define TIMER_COOKIE_CONNECTIONRECOVER 7
 
 typedef enum {MUSIC_LAYER, LOCATION_LAYER, NUM_LAYERS} AnimatedLayers;
 
@@ -60,6 +69,7 @@ static TextLayer music_artist_layer, music_song_layer, location_street_layer;
 static BitmapLayer background_image, weather_image, weather_tomorrow_image, battery_image_layer;
 
 static int32_t active_layer;
+static int32_t updateGPSInterval = GPS_UPDATE_INTERVAL;
 static bool connected = 0;
 static bool inGPSUpdate = 0;
 
@@ -129,9 +139,12 @@ int string2number(char *string) {
 int timestr2minutes(char *timestr) {
 	static char hourStr[3], minStr[3];
 	int32_t hour, min;
+	int8_t hDigits = 2;
+
+	if(timestr[1] == ':') hDigits = 1;
 	
-	strncpy(hourStr, timestr, 2);
-	strncpy(minStr, timestr+3, 2);
+	strncpy(hourStr, timestr, hDigits);
+	strncpy(minStr, timestr+hDigits+1, 2);
 	
 	hour = string2number(hourStr);
 	if(hour == -1) return -1;
@@ -142,6 +155,46 @@ int timestr2minutes(char *timestr) {
 	return min + (hour * 60);
 }
 
+void apptDisplay() {
+	int32_t apptInMinutes, timeInMinutes;
+	static char date_time_for_appt[] = "00/00 00:00";
+	PblTm t;
+	
+	get_time(&t);
+
+	/* Manage appoitment notification */
+	apptInMinutes = timestr2minutes(appointment_time + 6);
+	if(apptInMinutes >= 0) {
+		timeInMinutes = (t.tm_hour * 60) + t.tm_min;
+		//if(apptInMinutes < timeInMinutes) {
+			//layer_set_hidden(&calendar_layer, 1); 	
+		//}
+		if(apptInMinutes < timeInMinutes) {
+			snprintf(date_time_for_appt, 11, "%d min in", (int)(timeInMinutes - apptInMinutes));
+			text_layer_set_text(&calendar_date_layer, date_time_for_appt); 	
+			layer_set_hidden(&calendar_layer, 0);  	
+		}
+		if(apptInMinutes > timeInMinutes) {
+			if(((apptInMinutes - timeInMinutes) / 60) > 0) {
+				snprintf(date_time_for_appt, 11, "In %dh %dm", 
+						 (int)((apptInMinutes - timeInMinutes) / 60),
+						 (int)((apptInMinutes - timeInMinutes) % 60));
+			} else {
+				snprintf(date_time_for_appt, 11, "In %d min", (int)(apptInMinutes - timeInMinutes));
+			}
+			text_layer_set_text(&calendar_date_layer, date_time_for_appt); 	
+			layer_set_hidden(&calendar_layer, 0);  	
+		}
+		if(apptInMinutes == timeInMinutes) {
+			text_layer_set_text(&calendar_date_layer, "Now!"); 	
+			layer_set_hidden(&calendar_layer, 0);  	
+			vibes_double_pulse();
+		}
+		if((apptInMinutes >= timeInMinutes) && ((apptInMinutes - timeInMinutes) == 15)) {
+			vibes_short_pulse();
+		}
+	}
+}
 AppMessageResult sm_message_out_get(DictionaryIterator **iter_out) {
     AppMessageResult result = app_message_out_get(iter_out);
     if(result != APP_MSG_OK) return result;
@@ -149,6 +202,7 @@ AppMessageResult sm_message_out_get(DictionaryIterator **iter_out) {
     if(s_sequence_number == 0xFFFFFFFF) {
         s_sequence_number = 1;
     }
+	text_layer_set_text(&text_status_layer, "Send.");
     return APP_MSG_OK;
 }
 
@@ -190,6 +244,12 @@ void rcv(DictionaryIterator *received, void *context) {
 	
 	connected = 1;
 
+	t=dict_find(received, SM_COUNT_BATTERY_KEY); 
+	if (t!=NULL) {
+		batteryPercent = t->value->uint8;
+		layer_mark_dirty(&battery_ind_layer);
+	}
+
 	t=dict_find(received, SM_WEATHER_COND_KEY); 
 	if (t!=NULL) {
 		memcpy(weather_cond_str, t->value->cstring, strlen(t->value->cstring));
@@ -219,29 +279,25 @@ void rcv(DictionaryIterator *received, void *context) {
 		memcpy(weather_tomorrow_temp_str, t->value->cstring + 6, strlen(t->value->cstring));
         weather_tomorrow_temp_str[strlen(t->value->cstring)] = '\0';
 		text_layer_set_text(&text_weather_tomorrow_temp_layer, weather_tomorrow_temp_str); 	
+
+		sendCommandInt(SM_SCREEN_ENTER_KEY, STATUS_SCREEN_APP);
+	}
+
+	t=dict_find(received, SM_UPDATE_INTERVAL_KEY); 
+	if (t!=NULL) {
+		if(inGPSUpdate == 1) {
+			updateGPSInterval = t->value->int32 * 1000;
+			inGPSUpdate = 0;
+		}
 	}
 
 	t=dict_find(received, SM_GPS_1_KEY); 
 	if (t!=NULL) {
 		memcpy(location_street_str, t->value->cstring, strlen(t->value->cstring));
         location_street_str[strlen(t->value->cstring)] = '\0';
-		text_layer_set_text(&location_street_layer, location_street_str); 	
-
-	}
-	t=dict_find(received, SM_UPDATE_INTERVAL_KEY); 
-	if (t!=NULL) {
-		if(inGPSUpdate == 1) {
-			interval = t->value->int32 * 1000;
-
-			app_timer_cancel_event(g_app_context, timerUpdateGps);
-			timerUpdateGps = app_timer_send_event(g_app_context, interval, 6);
-		}
-	}
-
-	t=dict_find(received, SM_COUNT_BATTERY_KEY); 
-	if (t!=NULL) {
-		batteryPercent = t->value->uint8;
-		layer_mark_dirty(&battery_ind_layer);
+		text_layer_set_text(&location_street_layer, location_street_str);
+		
+		sendCommandInt(SM_SCREEN_ENTER_KEY, STATUS_SCREEN_APP);
 	}
 
 	t=dict_find(received, SM_STATUS_CAL_TIME_KEY); 
@@ -250,6 +306,8 @@ void rcv(DictionaryIterator *received, void *context) {
         calendar_date_str[strlen(t->value->cstring)] = '\0';
 		text_layer_set_text(&calendar_date_layer, calendar_date_str); 	
 		strncpy(appointment_time, calendar_date_str, 11);
+		
+		apptDisplay();
 	}
 
 	t=dict_find(received, SM_STATUS_CAL_TEXT_KEY); 
@@ -257,8 +315,15 @@ void rcv(DictionaryIterator *received, void *context) {
 		memcpy(calendar_text_str, t->value->cstring, strlen(t->value->cstring));
         calendar_text_str[strlen(t->value->cstring)] = '\0';
 		text_layer_set_text(&calendar_text_layer, calendar_text_str); 	
+		
+		if(strlen(calendar_text_str) <= 15)
+			text_layer_set_font(&calendar_text_layer, fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD));
+		else
+			if(strlen(calendar_text_str) <= 18)
+				text_layer_set_font(&calendar_text_layer, fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD));
+			else 
+				text_layer_set_font(&calendar_text_layer, fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD));
 	}
-
 
 	t=dict_find(received, SM_STATUS_MUS_ARTIST_KEY); 
 	if (t!=NULL) {
@@ -279,7 +344,7 @@ void rcv(DictionaryIterator *received, void *context) {
 		interval = t->value->int32 * 1000;
 
 		app_timer_cancel_event(g_app_context, timerUpdateWeather);
-		timerUpdateWeather = app_timer_send_event(g_app_context, interval /* milliseconds */, 1);
+		timerUpdateWeather = app_timer_send_event(g_app_context, interval /* milliseconds */, TIMER_COOKIE_WEATHER);
 	}
 
 	t=dict_find(received, SM_STATUS_UPD_CAL_KEY); 
@@ -287,7 +352,7 @@ void rcv(DictionaryIterator *received, void *context) {
 		interval = t->value->int32 * 1000;
 
 		app_timer_cancel_event(g_app_context, timerUpdateCalendar);
-		timerUpdateCalendar = app_timer_send_event(g_app_context, interval /* milliseconds */, 2);
+		timerUpdateCalendar = app_timer_send_event(g_app_context, interval /* milliseconds */, TIMER_COOKIE_CALANDAR);
 	}
 
 	t=dict_find(received, SM_SONG_LENGTH_KEY); 
@@ -295,9 +360,8 @@ void rcv(DictionaryIterator *received, void *context) {
 		interval = t->value->int32 * 1000;
 
 		app_timer_cancel_event(g_app_context, timerUpdateMusic);
-		timerUpdateMusic = app_timer_send_event(g_app_context, interval /* milliseconds */, 3);
+		timerUpdateMusic = app_timer_send_event(g_app_context, interval /* milliseconds */, TIMER_COOKIE_MUSIC);
 	}
-
 }
 
 void dropped(void *context, AppMessageResult reason){
@@ -313,7 +377,7 @@ void dropped(void *context, AppMessageResult reason){
 	}
 	
 	connected = 0;
-	timerRecoveryAttempt = app_timer_send_event(g_app_context, RECOVERY_ATTEMPT_INTERVAL, 7);
+	timerRecoveryAttempt = app_timer_send_event(g_app_context, RECOVERY_ATTEMPT_INTERVAL, TIMER_COOKIE_CONNECTIONRECOVER);
 }
 
 void sent_ok(DictionaryIterator *sent, void *context) {
@@ -344,7 +408,7 @@ void send_failed(DictionaryIterator *failed, AppMessageResult reason, void *cont
 	}
 	
 	connected = 0;
-	timerRecoveryAttempt = app_timer_send_event(g_app_context, RECOVERY_ATTEMPT_INTERVAL, 7);
+	timerRecoveryAttempt = app_timer_send_event(g_app_context, RECOVERY_ATTEMPT_INTERVAL, TIMER_COOKIE_CONNECTIONRECOVER);
 }
 
 
@@ -395,9 +459,7 @@ void swap_bottom_layer() {
 	property_animation_init_layer_frame(&ani_out, &animated_layer[active_layer], &GRect(30, 72, 75, 50), &GRect(-75, 72, 75, 50));
 	animation_schedule(&(ani_out.animation));
 
-
 	active_layer = (active_layer + 1) % (NUM_LAYERS);
-
 
 	property_animation_init_layer_frame(&ani_in, &animated_layer[active_layer], &GRect(144, 72, 75, 50), &GRect(30, 72, 75, 50));
 	animation_schedule(&(ani_in.animation));
@@ -447,8 +509,9 @@ void handle_status_appear(Window *window)
 	sendCommandInt(SM_SCREEN_ENTER_KEY, STATUS_SCREEN_APP);
 
 	// Start UI timers	
-	timerSwapBottomLayer = app_timer_send_event(g_app_context, SWAP_BOTTOM_LAYER_INTERVAL, 4);
-	timerUpdateGps = app_timer_send_event(g_app_context, GPS_UPDATE_INTERVAL, 6);
+	timerSwapBottomLayer = app_timer_send_event(g_app_context, SWAP_BOTTOM_LAYER_INTERVAL, TIMER_COOKIE_LAYERSWAP);
+	timerUpdateGps = app_timer_send_event(g_app_context, updateGPSInterval, TIMER_COOKIE_GPS);
+	timerUpdateMusic = app_timer_send_event(g_app_context, DEFAULT_SONG_UPDATE_INTERVAL, TIMER_COOKIE_MUSIC);
 }
 
 void handle_status_disappear(Window *window)
@@ -469,6 +532,7 @@ void handle_init(AppContextRef ctx) {
 
 	g_app_context = ctx;
 
+	appointment_time[0] = '\0';
 	window_init(&window, "Window Name");
 	window_set_window_handlers(&window, (WindowHandlers) {
 	    .appear = (WindowHandler)handle_status_appear,
@@ -578,7 +642,7 @@ void handle_init(AppContextRef ctx) {
 	text_layer_set_text(&calendar_date_layer, "No Upcoming"); 	
 
 
-	text_layer_init(&calendar_text_layer, GRect(6, 15, 132, 28));
+	text_layer_init(&calendar_text_layer, GRect(6, 15, 132, 29));
 	text_layer_set_text_alignment(&calendar_text_layer, GTextAlignmentLeft);
 	text_layer_set_text_color(&calendar_text_layer, GColorWhite);
 	text_layer_set_background_color(&calendar_text_layer, GColorClear);
@@ -638,12 +702,9 @@ void handle_minute_tick(AppContextRef ctx, PebbleTickEvent *t) {
 
   	static char time_text[] = "00:00";
   	static char date_text[] = "Xxxxxxxxx 00";
-	static char date_time_for_appt[] = "00/00 00:00";
 
   	char *time_format;
 	
-	int32_t apptInMinutes, timeInMinutes;
-
   	string_format_time(date_text, sizeof(date_text), "%b %e", t->tick_time);
   	text_layer_set_text(&text_date_layer, date_text);
 
@@ -662,44 +723,7 @@ void handle_minute_tick(AppContextRef ctx, PebbleTickEvent *t) {
 
   	text_layer_set_text(&text_time_layer, time_text);
 	
-	// Check if appointment starts
-	//string_format_time(date_time_for_appt, sizeof(date_time_for_appt), "%m/%d %H:%M", t->tick_time);
-	//if(strcmp(appointment_time, date_time_for_appt) == 0) {
-	//	vibes_double_pulse();
-	//}
-	
-	/* Manage appoitment notification */
-	apptInMinutes = timestr2minutes(appointment_time + 6);
-	if(apptInMinutes >= 0) {
-		timeInMinutes = (t->tick_time->tm_hour * 60) + t->tick_time->tm_min;
-		if((apptInMinutes < timeInMinutes) && ((timeInMinutes - apptInMinutes) > 15)) {
-			layer_set_hidden(&calendar_layer, 1); 	
-		}
-		if((apptInMinutes < timeInMinutes) && ((timeInMinutes - apptInMinutes) <= 15)) {
-			snprintf(date_time_for_appt, 10, "%d min in", (int)(timeInMinutes - apptInMinutes));
-			text_layer_set_text(&calendar_date_layer, date_time_for_appt); 	
-			layer_set_hidden(&calendar_layer, 0);  	
-		}
-		if(apptInMinutes > timeInMinutes) {
-			if(((apptInMinutes - timeInMinutes) / 60) > 0) {
-				snprintf(date_time_for_appt, 11, "In %dh %dm", 
-						 (int)((apptInMinutes - timeInMinutes) / 60),
-						 (int)((apptInMinutes - timeInMinutes) % 60));
-			} else {
-				snprintf(date_time_for_appt, 11, "In %d min", (int)(apptInMinutes - timeInMinutes));
-			}
-			text_layer_set_text(&calendar_date_layer, date_time_for_appt); 	
-			layer_set_hidden(&calendar_layer, 0);  	
-		}
-		if(apptInMinutes == timeInMinutes) {
-			text_layer_set_text(&calendar_date_layer, "Now!"); 	
-			layer_set_hidden(&calendar_layer, 0);  	
-			vibes_double_pulse();
-		}
-		if((apptInMinutes >= timeInMinutes) && ((apptInMinutes - timeInMinutes) == 15)) {
-			vibes_short_pulse();
-		}
-	}
+	apptDisplay();
 }
 
 void handle_deinit(AppContextRef ctx) {
@@ -716,46 +740,39 @@ void handle_timer(AppContextRef ctx, AppTimerHandle handle, uint32_t cookie) {
   (void)handle;
 
 /* Request new data from the phone once the timers expire */
-	if (cookie == 1) {
-		sendCommandInt(SM_SCREEN_EXIT_KEY, STATUS_SCREEN_APP);
+	if (cookie == TIMER_COOKIE_WEATHER) {
 		sendCommandInt(SM_SCREEN_ENTER_KEY, WEATHER_APP);
 		sendCommand(SM_STATUS_UPD_WEATHER_KEY);	
-		sendCommandInt(SM_SCREEN_EXIT_KEY, WEATHER_APP);
-		sendCommandInt(SM_SCREEN_ENTER_KEY, STATUS_SCREEN_APP);
 	}
-
-	if (cookie == 2) {
+	if (cookie == TIMER_COOKIE_CALANDAR) {
 		sendCommand(SM_STATUS_UPD_CAL_KEY);	
 	}
 
-	if (cookie == 3) {
+	if (cookie == TIMER_COOKIE_MUSIC) {
 		sendCommand(SM_SONG_LENGTH_KEY);	
 	}
 
-	if (cookie == 4) {
+	if (cookie == TIMER_COOKIE_LAYERSWAP) {
 		swap_bottom_layer();	
 
-		timerSwapBottomLayer = app_timer_send_event(g_app_context, SWAP_BOTTOM_LAYER_INTERVAL, 4);
+		timerSwapBottomLayer = app_timer_send_event(g_app_context, SWAP_BOTTOM_LAYER_INTERVAL, TIMER_COOKIE_LAYERSWAP);
 	}
 	
-	if (cookie == 5) {
+	if (cookie == TIMER_COOKIE_NEXTDAYWEATHER) {
 		sendCommandInt(SM_SCREEN_ENTER_KEY, WEATHER_APP);
 		sendCommand(SM_STATUS_UPD_WEATHER_KEY);	
-		sendCommandInt(SM_SCREEN_ENTER_KEY, STATUS_SCREEN_APP);
 	}
 		
-	if (cookie == 6) {
-		app_timer_cancel_event(g_app_context, timerUpdateGps);
+	if (cookie == TIMER_COOKIE_GPS) {
 		timerUpdateGps = 0;
 
-		sendCommandInt(SM_SCREEN_ENTER_KEY, GPS_APP);
 		inGPSUpdate = 1;
-		psleep(10);
-		sendCommandInt(SM_SCREEN_ENTER_KEY, STATUS_SCREEN_APP);
-		inGPSUpdate = 0;
+		sendCommandInt(SM_SCREEN_ENTER_KEY, GPS_APP);
+		
+		timerUpdateGps = app_timer_send_event(g_app_context, updateGPSInterval, 6);
 	}
 	
-	if (cookie == 7) {
+	if (cookie == TIMER_COOKIE_CONNECTIONRECOVER) {
 		sendCommandInt(SM_SCREEN_ENTER_KEY, STATUS_SCREEN_APP);
 	}
 }
