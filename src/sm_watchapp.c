@@ -71,6 +71,7 @@ static BitmapLayer background_image, weather_image, weather_tomorrow_image, batt
 static int32_t active_layer;
 static int32_t updateGPSInterval = GPS_UPDATE_INTERVAL;
 static bool connected = 0;
+static bool inTimeOut = 0;
 static bool inGPSUpdate = 0;
 
 static char string_buffer[STRING_LENGTH], location_street_str[STRING_LENGTH], appointment_time[15];
@@ -306,8 +307,6 @@ void rcv(DictionaryIterator *received, void *context) {
         calendar_date_str[strlen(t->value->cstring)] = '\0';
 		text_layer_set_text(&calendar_date_layer, calendar_date_str); 	
 		strncpy(appointment_time, calendar_date_str, 11);
-		
-		apptDisplay();
 	}
 
 	t=dict_find(received, SM_STATUS_CAL_TEXT_KEY); 
@@ -383,6 +382,7 @@ void dropped(void *context, AppMessageResult reason){
 void sent_ok(DictionaryIterator *sent, void *context) {
 	text_layer_set_text(&text_status_layer, "Ok");
 	connected = 1;
+	inTimeOut = 0;
 }
 
 void send_failed(DictionaryIterator *failed, AppMessageResult reason, void *context) {
@@ -397,6 +397,12 @@ void send_failed(DictionaryIterator *failed, AppMessageResult reason, void *cont
 	
 	if(reason == APP_MSG_SEND_TIMEOUT) {
 		text_layer_set_text(&text_status_layer, "T.Out");
+		if(inTimeOut == 1) {
+			vibes_double_pulse();
+			inTimeOut = 2;
+		} else {
+			inTimeOut = 1;
+		}
 	}
 	
 	if(reason == APP_MSG_BUSY) {
@@ -656,7 +662,7 @@ void handle_init(AppContextRef ctx) {
 	layer_init(&animated_layer[MUSIC_LAYER], GRect(144, 72, 75, 50));
 	layer_add_child(&window.layer, &animated_layer[MUSIC_LAYER]);
 	
-	text_layer_init(&music_artist_layer, GRect(0, 0, 75, 20));
+	text_layer_init(&music_artist_layer, GRect(0, 0, 75, 24));
 	text_layer_set_text_alignment(&music_artist_layer, GTextAlignmentCenter);
 	text_layer_set_text_color(&music_artist_layer, GColorWhite);
 	text_layer_set_background_color(&music_artist_layer, GColorClear);
@@ -665,7 +671,7 @@ void handle_init(AppContextRef ctx) {
 	text_layer_set_text(&music_artist_layer, "No Artist"); 	
 
 
-	text_layer_init(&music_song_layer, GRect(0, 21, 75, 20));
+	text_layer_init(&music_song_layer, GRect(0, 25, 75, 25));
 	text_layer_set_text_alignment(&music_song_layer, GTextAlignmentCenter);
 	text_layer_set_text_color(&music_song_layer, GColorWhite);
 	text_layer_set_background_color(&music_song_layer, GColorClear);
@@ -759,6 +765,7 @@ void handle_timer(AppContextRef ctx, AppTimerHandle handle, uint32_t cookie) {
 	}
 	
 	if (cookie == TIMER_COOKIE_NEXTDAYWEATHER) {
+		apptDisplay();
 		sendCommandInt(SM_SCREEN_ENTER_KEY, WEATHER_APP);
 		sendCommand(SM_STATUS_UPD_WEATHER_KEY);	
 	}
