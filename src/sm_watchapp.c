@@ -305,7 +305,7 @@ void rcv(DictionaryIterator *received, void *context) {
 	if (t!=NULL) {
 		memcpy(calendar_date_str, t->value->cstring, strlen(t->value->cstring));
         calendar_date_str[strlen(t->value->cstring)] = '\0';
-		text_layer_set_text(&calendar_date_layer, calendar_date_str); 	
+		//text_layer_set_text(&calendar_date_layer, calendar_date_str); 	
 		strncpy(appointment_time, calendar_date_str, 11);
 	}
 
@@ -397,11 +397,12 @@ void send_failed(DictionaryIterator *failed, AppMessageResult reason, void *cont
 	
 	if(reason == APP_MSG_SEND_TIMEOUT) {
 		text_layer_set_text(&text_status_layer, "T.Out");
+ 		if(inTimeOut == 0) {
+			inTimeOut = 1;
+		}
 		if(inTimeOut == 1) {
 			vibes_double_pulse();
 			inTimeOut = 2;
-		} else {
-			inTimeOut = 1;
 		}
 	}
 	
@@ -776,7 +777,7 @@ void handle_timer(AppContextRef ctx, AppTimerHandle handle, uint32_t cookie) {
 		inGPSUpdate = 1;
 		sendCommandInt(SM_SCREEN_ENTER_KEY, GPS_APP);
 		
-		timerUpdateGps = app_timer_send_event(g_app_context, updateGPSInterval, 6);
+		timerUpdateGps = app_timer_send_event(g_app_context, updateGPSInterval, TIMER_COOKIE_GPS);
 	}
 	
 	if (cookie == TIMER_COOKIE_CONNECTIONRECOVER) {
