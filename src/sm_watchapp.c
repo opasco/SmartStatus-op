@@ -156,20 +156,24 @@ int timestr2minutes(char *timestr) {
 	return min + (hour * 60);
 }
 
-void apptDisplay() {
+static void apptDisplay() {
 	int32_t apptInMinutes, timeInMinutes;
 	static char date_time_for_appt[] = "00/00 00:00";
 	PblTm t;
 	
 	get_time(&t);
+	
+	string_format_time(date_time_for_appt, sizeof(date_time_for_appt), "%m/%d", &t);
+	
+	if(strncmp(date_time_for_appt, appointment_time, 5) != 0) {
+		layer_set_hidden(&calendar_layer, 1);
+		return;
+	}
 
 	/* Manage appoitment notification */
 	apptInMinutes = timestr2minutes(appointment_time + 6);
 	if(apptInMinutes >= 0) {
 		timeInMinutes = (t.tm_hour * 60) + t.tm_min;
-		//if(apptInMinutes < timeInMinutes) {
-			//layer_set_hidden(&calendar_layer, 1); 	
-		//}
 		if(apptInMinutes < timeInMinutes) {
 			snprintf(date_time_for_appt, 11, "%d min in", (int)(timeInMinutes - apptInMinutes));
 			text_layer_set_text(&calendar_date_layer, date_time_for_appt); 	
@@ -195,7 +199,10 @@ void apptDisplay() {
 			vibes_short_pulse();
 		}
 	}
+	
+	layer_set_hidden(&calendar_layer, 0);
 }
+ 
 AppMessageResult sm_message_out_get(DictionaryIterator **iter_out) {
     AppMessageResult result = app_message_out_get(iter_out);
     if(result != APP_MSG_OK) return result;
