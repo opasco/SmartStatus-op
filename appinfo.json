@@ -1,0 +1,80 @@
+{
+    "versionLabel": "1.0",
+    "uuid": "9141B628-BC89-498E-B147-049F49C099AD",
+    "appKeys": {},
+    "longName": "SmartStatus-op",
+    "versionCode": 1,
+    "capabilities": [
+        ""
+    ],
+    "shortName": "SmartStatus-op",
+    "companyName": "Olivier Pasco",
+    "watchapp": {
+        "watchface": false
+    },
+    "resources": {
+        "media": [
+            {
+                "type": "png",
+                "name": "IMAGE_BATTERY",
+                "file": "images/battery.png"
+            },
+            {
+                "type": "font",
+                "name": "FONT_ROBOTO_CONDENSED_21",
+                "file": "fonts/Roboto-Condensed.ttf"
+            },
+            {
+                "characterRegex": "[:0-9]",
+                "type": "font",
+                "name": "FONT_ROBOTO_BOLD_SUBSET_49",
+                "file": "fonts/Roboto-Bold.ttf"
+            },
+            {
+                "type": "png",
+                "name": "APP_ICON",
+                "file": "images/app_icon.png"
+            },
+            {
+                "type": "png",
+                "name": "IMAGE_SUN_SMALL",
+                "file": "images/sun-small.png"
+            },
+            {
+                "type": "png",
+                "name": "IMAGE_RAIN_SMALL",
+                "file": "images/rain-small.png"
+            },
+            {
+                "type": "png",
+                "name": "IMAGE_CLOUD_SMALL",
+                "file": "images/cloud-small.png"
+            },
+            {
+                "type": "png",
+                "name": "IMAGE_SUN_CLOUD_SMALL",
+                "file": "images/sun_cloud-small.png"
+            },
+            {
+                "type": "png",
+                "name": "IMAGE_WIND_SMALL",
+                "file": "images/wind-small.png"
+            },
+            {
+                "type": "png",
+                "name": "IMAGE_FOG_SMALL",
+                "file": "images/fog-small.png"
+            },
+            {
+                "type": "png",
+                "name": "IMAGE_SNOW_SMALL",
+                "file": "images/snow-small.png"
+            },
+            {
+                "type": "png",
+                "name": "IMAGE_THUNDER_SMALL",
+                "file": "images/thunder-small.png"
+            }
+        ]
+    }
+}

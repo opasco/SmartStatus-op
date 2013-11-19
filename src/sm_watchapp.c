@@ -1,17 +1,8 @@
-#include "pebble_os.h"
-#include "pebble_app.h"
-#include "pebble_fonts.h"
+#include "pebble.h"
 
 #include "globals.h"
 
-
-#define MY_UUID { 0x91, 0x41, 0xB6, 0x28, 0xBC, 0x89, 0x49, 0x8E, 0xB1, 0x47, 0x04, 0x9F, 0x49, 0xC0, 0x99, 0xAD }
-
-PBL_APP_INFO(MY_UUID,
-             "SmartStatus-op", "Olivier Pasco",
-             1, 0, /* App version */
-             RESOURCE_ID_APP_ICON,
-             APP_INFO_STANDARD_APP);
+#define MAX(a, b) (((a) < (b)) ? (b) : (a))
 
 #define STRING_LENGTH 255
 #define NUM_WEATHER_IMAGES	8
@@ -37,41 +28,37 @@ void reset_sequence_number();
 void sendCommand(int key);
 void sendCommandInt(int key, int param);
 void rcv(DictionaryIterator *received, void *context);
-void dropped(void *context, AppMessageResult reason);
-void select_up_handler(ClickRecognizerRef recognizer, Window *window);
-void select_down_handler(ClickRecognizerRef recognizer, Window *window);
-void up_single_click_handler(ClickRecognizerRef recognizer, Window *window);
-void down_single_click_handler(ClickRecognizerRef recognizer, Window *window);
-void config_provider(ClickConfig **config, Window *window);
+void dropped(AppMessageResult reason, void *context);
+void select_up_handler(ClickRecognizerRef recognizer, void *context);
+void select_down_handler(ClickRecognizerRef recognizer, void *context);
+void up_single_click_handler(ClickRecognizerRef recognizer, void *context);
+void down_single_click_handler(ClickRecognizerRef recognizer, void *context);
+void config_provider();
 void battery_layer_update_callback(Layer *me, GContext* ctx);
 void handle_status_appear(Window *window);
 void handle_status_disappear(Window *window);
-void handle_init(AppContextRef ctx);
-void handle_minute_tick(AppContextRef ctx, PebbleTickEvent *t);
-void handle_deinit(AppContextRef ctx);	
+void handle_minute_tick(struct tm* tick_time, TimeUnits units_changed);
 void reset();	
+void swap_bottom_layer();
 	
-AppContextRef g_app_context;
+static Window *window;
+static PropertyAnimation *ani_out, *ani_in;
 
+static Layer *animated_layer[NUM_LAYERS], *weather_layer;
+static Layer *battery_layer, *battery_ind_layer, *calendar_layer;
 
-static Window window;
-static PropertyAnimation ani_out, ani_in;
+static TextLayer *text_date_layer, *text_time_layer;
 
-static Layer animated_layer[NUM_LAYERS], weather_layer;
-static Layer battery_layer, battery_ind_layer, calendar_layer;
-
-static TextLayer text_date_layer, text_time_layer;
-
-static TextLayer text_weather_cond_layer, text_weather_temp_layer, text_weather_tomorrow_temp_layer, text_battery_layer;
-static TextLayer calendar_date_layer, calendar_text_layer, text_status_layer;
-static TextLayer music_artist_layer, music_song_layer, location_street_layer;
+static TextLayer *text_weather_cond_layer, *text_weather_temp_layer, *text_weather_tomorrow_temp_layer, *text_battery_layer;
+static TextLayer *calendar_date_layer, *calendar_text_layer, *text_status_layer;
+static TextLayer *music_artist_layer, *music_song_layer, *location_street_layer;
  
-static BitmapLayer background_image, weather_image, weather_tomorrow_image, battery_image_layer;
+static BitmapLayer *background_image, *weather_image, *weather_tomorrow_image, *battery_image_layer;
 
 static int32_t active_layer;
 static int32_t updateGPSInterval = GPS_UPDATE_INTERVAL;
 static bool connected = 0;
-static bool inTimeOut = 0;
+static int8_t inTimeOut = 0;
 static bool inGPSUpdate = 0;
 
 static char string_buffer[STRING_LENGTH], location_street_str[STRING_LENGTH], appointment_time[15];
@@ -82,16 +69,16 @@ static char calendar_date_str[STRING_LENGTH], calendar_text_str[STRING_LENGTH];
 static char music_artist_str[STRING_LENGTH], music_title_str[STRING_LENGTH];
 
 
-HeapBitmap battery_image;
-HeapBitmap weather_status_small_imgs[NUM_WEATHER_IMAGES];
+GBitmap *battery_image;
+GBitmap *weather_status_small_imgs[NUM_WEATHER_IMAGES];
 
-static AppTimerHandle timerUpdateCalendar = 0;
-static AppTimerHandle timerUpdateWeather = 0;
-static AppTimerHandle timerUpdateMusic = 0;
-static AppTimerHandle timerSwapBottomLayer = 0;
-static AppTimerHandle timerUpdateWeatherForecast = 0;
-static AppTimerHandle timerUpdateGps = 0;
-static AppTimerHandle timerRecoveryAttempt = 0;
+static AppTimer *timerUpdateCalendar = NULL;
+static AppTimer *timerUpdateWeather = NULL;
+static AppTimer *timerUpdateMusic = NULL;
+static AppTimer *timerSwapBottomLayer = NULL;
+static AppTimer *timerUpdateWeatherForecast = NULL;
+static AppTimer *timerUpdateGps = NULL;
+static AppTimer *timerRecoveryAttempt = NULL;
 
 const int WEATHER_SMALL_IMG_IDS[] = {
   RESOURCE_ID_IMAGE_SUN_SMALL,
@@ -159,25 +146,24 @@ int timestr2minutes(char *timestr) {
 static void apptDisplay() {
 	int32_t apptInMinutes, timeInMinutes;
 	static char date_time_for_appt[] = "00/00 00:00";
-	PblTm t;
+	time_t now = time(NULL);
+	struct tm *t = localtime(&now);
 	
-	get_time(&t);
-	
-	string_format_time(date_time_for_appt, sizeof(date_time_for_appt), "%m/%d", &t);
+	strftime(date_time_for_appt, sizeof(date_time_for_appt), "%m/%d", t);
 	
 	if(strncmp(date_time_for_appt, appointment_time, 5) != 0) {
-		layer_set_hidden(&calendar_layer, 1);
+		layer_set_hidden(calendar_layer, 1);
 		return;
 	}
 
 	/* Manage appoitment notification */
 	apptInMinutes = timestr2minutes(appointment_time + 6);
 	if(apptInMinutes >= 0) {
-		timeInMinutes = (t.tm_hour * 60) + t.tm_min;
+		timeInMinutes = (t->tm_hour * 60) + t->tm_min;
 		if(apptInMinutes < timeInMinutes) {
 			snprintf(date_time_for_appt, 11, "%d min in", (int)(timeInMinutes - apptInMinutes));
-			text_layer_set_text(&calendar_date_layer, date_time_for_appt); 	
-			layer_set_hidden(&calendar_layer, 0);  	
+			text_layer_set_text(calendar_date_layer, date_time_for_appt); 	
+			layer_set_hidden(calendar_layer, 0);  	
 		}
 		if(apptInMinutes > timeInMinutes) {
 			if(((apptInMinutes - timeInMinutes) / 60) > 0) {
@@ -187,12 +173,12 @@ static void apptDisplay() {
 			} else {
 				snprintf(date_time_for_appt, 11, "In %d min", (int)(apptInMinutes - timeInMinutes));
 			}
-			text_layer_set_text(&calendar_date_layer, date_time_for_appt); 	
-			layer_set_hidden(&calendar_layer, 0);  	
+			text_layer_set_text(calendar_date_layer, date_time_for_appt); 	
+			layer_set_hidden(calendar_layer, 0);  	
 		}
 		if(apptInMinutes == timeInMinutes) {
-			text_layer_set_text(&calendar_date_layer, "Now!"); 	
-			layer_set_hidden(&calendar_layer, 0);  	
+			text_layer_set_text(calendar_date_layer, "Now!"); 	
+			layer_set_hidden(calendar_layer, 0);  	
 			vibes_double_pulse();
 		}
 		if((apptInMinutes >= timeInMinutes) && ((apptInMinutes - timeInMinutes) == 15)) {
@@ -200,27 +186,26 @@ static void apptDisplay() {
 		}
 	}
 	
-	layer_set_hidden(&calendar_layer, 0);
+	layer_set_hidden(calendar_layer, 0);
 }
  
 AppMessageResult sm_message_out_get(DictionaryIterator **iter_out) {
-    AppMessageResult result = app_message_out_get(iter_out);
+    AppMessageResult result = app_message_outbox_begin(iter_out);
     if(result != APP_MSG_OK) return result;
     dict_write_int32(*iter_out, SM_SEQUENCE_NUMBER_KEY, ++s_sequence_number);
     if(s_sequence_number == 0xFFFFFFFF) {
         s_sequence_number = 1;
     }
-	text_layer_set_text(&text_status_layer, "Send.");
+	text_layer_set_text(text_status_layer, "Send.");
     return APP_MSG_OK;
 }
 
 void reset_sequence_number() {
     DictionaryIterator *iter = NULL;
-    app_message_out_get(&iter);
+    app_message_outbox_begin(&iter);
     if(!iter) return;
     dict_write_int32(iter, SM_SEQUENCE_NUMBER_KEY, 0xFFFFFFFF);
-    app_message_out_send();
-    app_message_out_release();
+    app_message_outbox_send();
 }
 
 
@@ -230,8 +215,7 @@ void sendCommand(int key) {
     if(!iterout) return;
 	
 	dict_write_int8(iterout, key, -1);
-	app_message_out_send();
-	app_message_out_release();	
+	app_message_outbox_send();
 }
 
 
@@ -241,8 +225,46 @@ void sendCommandInt(int key, int param) {
     if(!iterout) return;
 	
 	dict_write_int8(iterout, key, param);
-	app_message_out_send();
-	app_message_out_release();	
+	app_message_outbox_send();
+}
+
+// Timer callbacks
+void timer_cbk_weather() {
+	sendCommandInt(SM_SCREEN_ENTER_KEY, WEATHER_APP);
+	sendCommand(SM_STATUS_UPD_WEATHER_KEY);	
+}
+		
+void timer_cbk_calandar() {
+	sendCommand(SM_STATUS_UPD_CAL_KEY);	
+}
+
+void timer_cbk_music() {
+	sendCommand(SM_SONG_LENGTH_KEY);	
+}
+
+void timer_cbk_layerswap() {
+	swap_bottom_layer();	
+
+	timerSwapBottomLayer = app_timer_register(SWAP_BOTTOM_LAYER_INTERVAL, timer_cbk_layerswap, NULL);
+}
+	
+void timer_cbk_nextdayweather() {
+	apptDisplay();
+	sendCommandInt(SM_SCREEN_ENTER_KEY, WEATHER_APP);
+	sendCommand(SM_STATUS_UPD_WEATHER_KEY);	
+}
+		
+void timer_cbk_gps() {
+	timerUpdateGps = 0;
+
+	inGPSUpdate = 1;
+	sendCommandInt(SM_SCREEN_ENTER_KEY, GPS_APP);
+		
+	timerUpdateGps = app_timer_register(updateGPSInterval, timer_cbk_gps, NULL);
+}
+	
+void timer_cbk_connectionrecover() {
+	sendCommandInt(SM_SCREEN_ENTER_KEY, STATUS_SCREEN_APP);
 }
 
 void rcv(DictionaryIterator *received, void *context) {
@@ -252,41 +274,44 @@ void rcv(DictionaryIterator *received, void *context) {
 	
 	connected = 1;
 
-	t=dict_find(received, SM_COUNT_BATTERY_KEY); 
+	t = dict_find(received, SM_COUNT_BATTERY_KEY); 
+	
 	if (t!=NULL) {
 		batteryPercent = t->value->uint8;
-		layer_mark_dirty(&battery_ind_layer);
+		layer_mark_dirty(battery_ind_layer);
 	}
 
+	/*
 	t=dict_find(received, SM_WEATHER_COND_KEY); 
 	if (t!=NULL) {
-		memcpy(weather_cond_str, t->value->cstring, strlen(t->value->cstring));
+		memcpy(weather_cond_str, t->value->cstring, MAX(strlen(t->value->cstring), STRING_LENGTH - 1));
         weather_cond_str[strlen(t->value->cstring)] = '\0';
-		text_layer_set_text(&text_weather_cond_layer, weather_cond_str); 	
+		text_layer_set_text(text_weather_cond_layer, weather_cond_str); 	
 	}
+	*/
 
 	t=dict_find(received, SM_WEATHER_TEMP_KEY); 
 	if (t!=NULL) {
 		memcpy(weather_temp_str, t->value->cstring, strlen(t->value->cstring));
         weather_temp_str[strlen(t->value->cstring)] = '\0';
-		text_layer_set_text(&text_weather_temp_layer, weather_temp_str); 
+		text_layer_set_text(text_weather_temp_layer, weather_temp_str); 
 	}
 
 	t=dict_find(received, SM_WEATHER_ICON_KEY); 
 	if (t!=NULL) {
-		bitmap_layer_set_bitmap(&weather_image, &weather_status_small_imgs[t->value->uint8].bmp);	  	
+		bitmap_layer_set_bitmap(weather_image, weather_status_small_imgs[t->value->uint8]);	  	
 	}
 
 	t=dict_find(received, SM_WEATHER_ICON1_KEY); 
 	if (t!=NULL) {
-		bitmap_layer_set_bitmap(&weather_tomorrow_image, &weather_status_small_imgs[t->value->uint8].bmp);	  	
+		bitmap_layer_set_bitmap(weather_tomorrow_image, weather_status_small_imgs[t->value->uint8]);	  	
 	}
 	
 	t=dict_find(received, SM_WEATHER_DAY1_KEY); 
 	if (t!=NULL) {
 		memcpy(weather_tomorrow_temp_str, t->value->cstring + 6, strlen(t->value->cstring));
         weather_tomorrow_temp_str[strlen(t->value->cstring)] = '\0';
-		text_layer_set_text(&text_weather_tomorrow_temp_layer, weather_tomorrow_temp_str); 	
+		text_layer_set_text(text_weather_tomorrow_temp_layer, weather_tomorrow_temp_str); 	
 
 		sendCommandInt(SM_SCREEN_ENTER_KEY, STATUS_SCREEN_APP);
 	}
@@ -303,7 +328,7 @@ void rcv(DictionaryIterator *received, void *context) {
 	if (t!=NULL) {
 		memcpy(location_street_str, t->value->cstring, strlen(t->value->cstring));
         location_street_str[strlen(t->value->cstring)] = '\0';
-		text_layer_set_text(&location_street_layer, location_street_str);
+		text_layer_set_text(location_street_layer, location_street_str);
 		
 		sendCommandInt(SM_SCREEN_ENTER_KEY, STATUS_SCREEN_APP);
 	}
@@ -312,7 +337,7 @@ void rcv(DictionaryIterator *received, void *context) {
 	if (t!=NULL) {
 		memcpy(calendar_date_str, t->value->cstring, strlen(t->value->cstring));
         calendar_date_str[strlen(t->value->cstring)] = '\0';
-		//text_layer_set_text(&calendar_date_layer, calendar_date_str); 	
+		//text_layer_set_text(calendar_date_layer, calendar_date_str); 	
 		strncpy(appointment_time, calendar_date_str, 11);
 	}
 
@@ -320,188 +345,153 @@ void rcv(DictionaryIterator *received, void *context) {
 	if (t!=NULL) {
 		memcpy(calendar_text_str, t->value->cstring, strlen(t->value->cstring));
         calendar_text_str[strlen(t->value->cstring)] = '\0';
-		text_layer_set_text(&calendar_text_layer, calendar_text_str); 	
+		text_layer_set_text(calendar_text_layer, calendar_text_str); 	
 		
 		if(strlen(calendar_text_str) <= 15)
-			text_layer_set_font(&calendar_text_layer, fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD));
+			text_layer_set_font(calendar_text_layer, fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD));
 		else
 			if(strlen(calendar_text_str) <= 18)
-				text_layer_set_font(&calendar_text_layer, fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD));
+				text_layer_set_font(calendar_text_layer, fonts_get_system_font(FONT_KEY_GOTHIC_18_BOLD));
 			else 
-				text_layer_set_font(&calendar_text_layer, fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD));
+				text_layer_set_font(calendar_text_layer, fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD));
 	}
 
 	t=dict_find(received, SM_STATUS_MUS_ARTIST_KEY); 
 	if (t!=NULL) {
 		memcpy(music_artist_str, t->value->cstring, strlen(t->value->cstring));
         music_artist_str[strlen(t->value->cstring)] = '\0';
-		text_layer_set_text(&music_artist_layer, music_artist_str); 	
+		text_layer_set_text(music_artist_layer, music_artist_str); 	
 	}
 
 	t=dict_find(received, SM_STATUS_MUS_TITLE_KEY); 
 	if (t!=NULL) {
 		memcpy(music_title_str, t->value->cstring, strlen(t->value->cstring));
         music_title_str[strlen(t->value->cstring)] = '\0';
-		text_layer_set_text(&music_song_layer, music_title_str); 	
+		text_layer_set_text(music_song_layer, music_title_str); 	
 	}
 
 	t=dict_find(received, SM_STATUS_UPD_WEATHER_KEY); 
 	if (t!=NULL) {
 		interval = t->value->int32 * 1000;
 
-		app_timer_cancel_event(g_app_context, timerUpdateWeather);
-		timerUpdateWeather = app_timer_send_event(g_app_context, interval /* milliseconds */, TIMER_COOKIE_WEATHER);
+		app_timer_cancel(timerUpdateWeather);
+		timerUpdateWeather = app_timer_register(interval, timer_cbk_weather, NULL);
 	}
 
 	t=dict_find(received, SM_STATUS_UPD_CAL_KEY); 
 	if (t!=NULL) {
 		interval = t->value->int32 * 1000;
 
-		app_timer_cancel_event(g_app_context, timerUpdateCalendar);
-		timerUpdateCalendar = app_timer_send_event(g_app_context, interval /* milliseconds */, TIMER_COOKIE_CALANDAR);
+		app_timer_cancel(timerUpdateCalendar);
+		timerUpdateCalendar = app_timer_register(interval, timer_cbk_calandar, NULL);
 	}
 
 	t=dict_find(received, SM_SONG_LENGTH_KEY); 
 	if (t!=NULL) {
 		interval = t->value->int32 * 1000;
 
-		app_timer_cancel_event(g_app_context, timerUpdateMusic);
-		timerUpdateMusic = app_timer_send_event(g_app_context, interval /* milliseconds */, TIMER_COOKIE_MUSIC);
+		app_timer_cancel(timerUpdateMusic);
+		timerUpdateMusic = app_timer_register(interval, timer_cbk_music, NULL);
 	}
 }
 
-void dropped(void *context, AppMessageResult reason){
+void dropped(AppMessageResult reason, void *context){
 	// DO SOMETHING WITH THE DROPPED REASON / DISPLAY AN ERROR / RESEND 
-	text_layer_set_text(&text_status_layer, "Drop.");
+	text_layer_set_text(text_status_layer, "Drop.");
 	
 	if(reason == APP_MSG_BUSY) {
-		text_layer_set_text(&text_status_layer, ">Busy");
+		text_layer_set_text(text_status_layer, ">Busy");
 	}
 	
 	if(reason == APP_MSG_BUFFER_OVERFLOW) {
-		text_layer_set_text(&text_status_layer, "Over.");
+		text_layer_set_text(text_status_layer, "Over.");
 	}
 	
 	connected = 0;
-	timerRecoveryAttempt = app_timer_send_event(g_app_context, RECOVERY_ATTEMPT_INTERVAL, TIMER_COOKIE_CONNECTIONRECOVER);
+	timerRecoveryAttempt = app_timer_register(RECOVERY_ATTEMPT_INTERVAL, timer_cbk_connectionrecover, NULL);
 }
 
 void sent_ok(DictionaryIterator *sent, void *context) {
-	text_layer_set_text(&text_status_layer, "Ok");
+	text_layer_set_text(text_status_layer, "Ok");
 	connected = 1;
 	inTimeOut = 0;
 }
 
 void send_failed(DictionaryIterator *failed, AppMessageResult reason, void *context) {
-	text_layer_set_text(&text_status_layer, "Err.");
+	text_layer_set_text(text_status_layer, "Err.");
 	
 	if(reason == APP_MSG_NOT_CONNECTED) {
-		text_layer_set_text(&text_status_layer, "Disc.");
+		text_layer_set_text(text_status_layer, "Disc.");
 		if(connected == 1) {
 			vibes_double_pulse();
 		}
 	}
 	
 	if(reason == APP_MSG_SEND_TIMEOUT) {
-		text_layer_set_text(&text_status_layer, "T.Out");
+		text_layer_set_text(text_status_layer, "T.Out");
  		if(inTimeOut == 0) {
 			inTimeOut = 1;
-		}
-		if(inTimeOut == 1) {
+		} else if(inTimeOut == 1) {
 			vibes_double_pulse();
 			inTimeOut = 2;
 		}
 	}
 	
 	if(reason == APP_MSG_BUSY) {
-		text_layer_set_text(&text_status_layer, "<Busy");
+		text_layer_set_text(text_status_layer, "<Busy");
 	}
 	
 	if(reason == APP_MSG_SEND_REJECTED) {
-		text_layer_set_text(&text_status_layer, "Nack");
+		text_layer_set_text(text_status_layer, "Nack");
 	}
 	
 	connected = 0;
-	timerRecoveryAttempt = app_timer_send_event(g_app_context, RECOVERY_ATTEMPT_INTERVAL, TIMER_COOKIE_CONNECTIONRECOVER);
+	timerRecoveryAttempt = app_timer_register(RECOVERY_ATTEMPT_INTERVAL, timer_cbk_connectionrecover, NULL);
 }
 
 
-void select_single_click_handler(ClickRecognizerRef recognizer, Window *window) {
-  (void)recognizer;
-  (void)window;
-
+void select_single_click_handler(ClickRecognizerRef recognizer, void *context) {
 	sendCommand(SM_PLAYPAUSE_KEY);
 }
 
-void select_long_click_handler(ClickRecognizerRef recognizer, Window *window) {
-  (void)recognizer;
-  (void)window;
-
+void select_long_click_handler(ClickRecognizerRef recognizer, void *context) {
 	sendCommand(SM_FIND_MY_PHONE_KEY);
 }
 
-void select_up_handler(ClickRecognizerRef recognizer, Window *window) {
-  (void)recognizer;
-  (void)window;
-
+void select_up_handler(ClickRecognizerRef recognizer, void *context) {
 }
 
 
-void select_down_handler(ClickRecognizerRef recognizer, Window *window) {
-  (void)recognizer;
-  (void)window;
+void select_down_handler(ClickRecognizerRef recognizer, void *context) {
 }
 
 
-void up_single_click_handler(ClickRecognizerRef recognizer, Window *window) {
-  (void)recognizer;
-  (void)window;
-
+void up_single_click_handler(ClickRecognizerRef recognizer, void *context) {
 	sendCommand(SM_VOLUME_UP_KEY);
 }
 
-void down_single_click_handler(ClickRecognizerRef recognizer, Window *window) {
-  (void)recognizer;
-  (void)window;
-
+void down_single_click_handler(ClickRecognizerRef recognizer, void *context) {
 	sendCommand(SM_VOLUME_DOWN_KEY);
 }
 
 void swap_bottom_layer() {
 	//on a press of the bottom button, scroll in the next layer
 
-	property_animation_init_layer_frame(&ani_out, &animated_layer[active_layer], &GRect(30, 72, 75, 50), &GRect(-75, 72, 75, 50));
-	animation_schedule(&(ani_out.animation));
+	ani_out = property_animation_create_layer_frame(animated_layer[active_layer], &GRect(30, 72, 75, 50), &GRect(-75, 72, 75, 50));
+	animation_schedule(&(ani_out->animation));
 
 	active_layer = (active_layer + 1) % (NUM_LAYERS);
 
-	property_animation_init_layer_frame(&ani_in, &animated_layer[active_layer], &GRect(144, 72, 75, 50), &GRect(30, 72, 75, 50));
-	animation_schedule(&(ani_in.animation));
+	ani_in = property_animation_create_layer_frame(animated_layer[active_layer], &GRect(144, 72, 75, 50), &GRect(30, 72, 75, 50));
+	animation_schedule(&(ani_in->animation));
 }
 
 
-void config_provider(ClickConfig **config, Window *window) {
-  (void)window;
-
-
-  config[BUTTON_ID_SELECT]->click.handler = (ClickHandler) select_single_click_handler;
-//  config[BUTTON_ID_SELECT]->raw.up_handler = (ClickHandler) select_up_handler;
-//  config[BUTTON_ID_SELECT]->raw.down_handler = (ClickHandler) select_down_handler;
-
-  config[BUTTON_ID_SELECT]->long_click.handler = (ClickHandler) select_long_click_handler;
-//  config[BUTTON_ID_SELECT]->long_click.release_handler = (ClickHandler) select_long_release_handler;
-
-
-  config[BUTTON_ID_UP]->click.handler = (ClickHandler) up_single_click_handler;
-  config[BUTTON_ID_UP]->click.repeat_interval_ms = 100;
-//  config[BUTTON_ID_UP]->long_click.handler = (ClickHandler) up_long_click_handler;
-//  config[BUTTON_ID_UP]->long_click.release_handler = (ClickHandler) up_long_release_handler;
-
-  config[BUTTON_ID_DOWN]->click.handler = (ClickHandler) down_single_click_handler;
-  config[BUTTON_ID_DOWN]->click.repeat_interval_ms = 100;
-//  config[BUTTON_ID_DOWN]->long_click.handler = (ClickHandler) down_long_click_handler;
-//  config[BUTTON_ID_DOWN]->long_click.release_handler = (ClickHandler) down_long_release_handler;
-
+void config_provider() {
+  window_single_click_subscribe(BUTTON_ID_SELECT, select_single_click_handler);
+  window_long_click_subscribe(BUTTON_ID_SELECT, 0, select_long_click_handler, NULL);
+  window_single_click_subscribe(BUTTON_ID_UP, up_single_click_handler);
+  window_single_click_subscribe(BUTTON_ID_DOWN, down_single_click_handler);
 }
 
 
@@ -515,212 +505,177 @@ void battery_layer_update_callback(Layer *me, GContext* ctx) {
 	
 }
 
+void window_load(Window *this) {
+	Layer *window_layer = window_get_root_layer(this);
+	GRect bounds = layer_get_bounds(window_layer);
 
-void handle_status_appear(Window *window)
-{
-	text_layer_set_text(&text_status_layer, "Hello");
-	
-	sendCommandInt(SM_SCREEN_ENTER_KEY, STATUS_SCREEN_APP);
-
-	// Start UI timers	
-	timerSwapBottomLayer = app_timer_send_event(g_app_context, SWAP_BOTTOM_LAYER_INTERVAL, TIMER_COOKIE_LAYERSWAP);
-	timerUpdateGps = app_timer_send_event(g_app_context, updateGPSInterval, TIMER_COOKIE_GPS);
-	timerUpdateMusic = app_timer_send_event(g_app_context, DEFAULT_SONG_UPDATE_INTERVAL, TIMER_COOKIE_MUSIC);
-}
-
-void handle_status_disappear(Window *window)
-{
-	text_layer_set_text(&text_status_layer, "Bye");
-	
-	sendCommandInt(SM_SCREEN_EXIT_KEY, STATUS_SCREEN_APP);
-	
-	app_timer_cancel_event(g_app_context, timerUpdateCalendar);
-	app_timer_cancel_event(g_app_context, timerUpdateMusic);
-	app_timer_cancel_event(g_app_context, timerUpdateWeather);
-	app_timer_cancel_event(g_app_context, timerSwapBottomLayer);
-	app_timer_cancel_event(g_app_context, timerUpdateGps);
-}
-
-void handle_init(AppContextRef ctx) {
-	(void)ctx;
-
-	g_app_context = ctx;
-
-	appointment_time[0] = '\0';
-	window_init(&window, "Window Name");
-	window_set_window_handlers(&window, (WindowHandlers) {
-	    .appear = (WindowHandler)handle_status_appear,
-	    .disappear = (WindowHandler)handle_status_disappear
-	});
-
-	window_stack_push(&window, true /* Animated */);
-	window_set_fullscreen(&window, true);
-	window_set_background_color(&window, GColorBlack);
-
-	resource_init_current_app(&APP_RESOURCES);
-
+	//resource_init_current_app(&APP_RESOURCES);
 
 	//init weather images
 	for (int8_t i=0; i<NUM_WEATHER_IMAGES; i++) {
-		heap_bitmap_init(&weather_status_small_imgs[i], WEATHER_SMALL_IMG_IDS[i]);
+		weather_status_small_imgs[i] = gbitmap_create_with_resource(WEATHER_SMALL_IMG_IDS[i]);
 	}
 	
 	// init battery layer
-	layer_init(&battery_layer, GRect(95, 45, 49, 45));
-	layer_add_child(&window.layer, &battery_layer);
+	battery_layer = layer_create(GRect(95, 45, 49, 45));
+	layer_add_child(window_layer, battery_layer);
 
-	heap_bitmap_init(&battery_image, RESOURCE_ID_IMAGE_BATTERY);
+	battery_image = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_BATTERY);
 
-	bitmap_layer_init(&battery_image_layer, GRect(12, 8, 23, 14));
-	layer_add_child(&battery_layer, &battery_image_layer.layer);
-	bitmap_layer_set_bitmap(&battery_image_layer, &battery_image.bmp);
+	battery_image_layer = bitmap_layer_create(GRect(12, 8, 23, 14));
+	layer_add_child(battery_layer, bitmap_layer_get_layer(battery_image_layer));
+	bitmap_layer_set_bitmap(battery_image_layer, battery_image);
 
-	layer_init(&battery_ind_layer, GRect(14, 9, 19, 11));
-	battery_ind_layer.update_proc = &battery_layer_update_callback;
-	layer_add_child(&battery_layer, &battery_ind_layer);
+	battery_ind_layer = layer_create(GRect(14, 9, 19, 11));
+	layer_set_update_proc(battery_ind_layer, battery_layer_update_callback);
+	layer_add_child(battery_layer, battery_ind_layer);
 
 	batteryPercent = 100;
-	layer_mark_dirty(&battery_ind_layer);
+	layer_mark_dirty(battery_ind_layer);
 
 	//init weather layer and add weather image, weather condition, temperature
-	layer_init(&weather_layer, GRect(0, 78, 144, 45));
-	layer_add_child(&window.layer, &weather_layer);
+	weather_layer = layer_create(GRect(0, 78, 144, 45));
+	layer_add_child(window_layer, weather_layer);
 
 
 	weather_img = 0;
 
-	bitmap_layer_init(&weather_image, GRect(5, 4, 20, 20)); // GRect(52, 2, 40, 40)
-	layer_add_child(&weather_layer, &weather_image.layer);
-	bitmap_layer_set_bitmap(&weather_image, &weather_status_small_imgs[0].bmp);
+	weather_image = bitmap_layer_create(GRect(5, 4, 20, 20)); // GRect(52, 2, 40, 40)
+	layer_add_child(weather_layer, bitmap_layer_get_layer(weather_image));
+	bitmap_layer_set_bitmap(weather_image, weather_status_small_imgs[0]);
 
 	weather_tomorrow_img = 0;
 
-	bitmap_layer_init(&weather_tomorrow_image, GRect(112, 4, 20, 20)); // GRect(52, 2, 40, 40)
-	layer_add_child(&weather_layer, &weather_tomorrow_image.layer);
-	bitmap_layer_set_bitmap(&weather_tomorrow_image, &weather_status_small_imgs[0].bmp);
+	weather_tomorrow_image = bitmap_layer_create(GRect(112, 4, 20, 20)); // GRect(52, 2, 40, 40)
+	layer_add_child(weather_layer, bitmap_layer_get_layer(weather_tomorrow_image));
+	bitmap_layer_set_bitmap(weather_tomorrow_image, weather_status_small_imgs[0]);
 
-	text_layer_init(&text_weather_tomorrow_temp_layer, GRect(105, 23, 31, 20)); // GRect(5, 2, 47, 40)
-	text_layer_set_text_alignment(&text_weather_tomorrow_temp_layer, GTextAlignmentCenter);
-	text_layer_set_text_color(&text_weather_tomorrow_temp_layer, GColorWhite);
-	text_layer_set_background_color(&text_weather_tomorrow_temp_layer, GColorClear);
-	text_layer_set_font(&text_weather_tomorrow_temp_layer, fonts_get_system_font(FONT_KEY_GOTHIC_14));
-	layer_add_child(&weather_layer, &text_weather_tomorrow_temp_layer.layer);
-	text_layer_set_text(&text_weather_tomorrow_temp_layer, "../.."); 	
+	text_weather_tomorrow_temp_layer = text_layer_create(GRect(105, 23, 31, 20)); // GRect(5, 2, 47, 40)
+	text_layer_set_text_alignment(text_weather_tomorrow_temp_layer, GTextAlignmentCenter);
+	text_layer_set_text_color(text_weather_tomorrow_temp_layer, GColorWhite);
+	text_layer_set_background_color(text_weather_tomorrow_temp_layer, GColorClear);
+	text_layer_set_font(text_weather_tomorrow_temp_layer, fonts_get_system_font(FONT_KEY_GOTHIC_14));
+	layer_add_child(weather_layer, text_layer_get_layer(text_weather_tomorrow_temp_layer));
+	text_layer_set_text(text_weather_tomorrow_temp_layer, "../.."); 	
 	
-	text_layer_init(&text_weather_temp_layer, GRect(5, 23, 25, 20)); // GRect(98, 4, 47, 40)
-	text_layer_set_text_alignment(&text_weather_temp_layer, GTextAlignmentCenter);
-	text_layer_set_text_color(&text_weather_temp_layer, GColorWhite);
-	text_layer_set_background_color(&text_weather_temp_layer, GColorClear);
-	text_layer_set_font(&text_weather_temp_layer, fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD));
-	layer_add_child(&weather_layer, &text_weather_temp_layer.layer);
-	text_layer_set_text(&text_weather_temp_layer, "-°"); 	
+	text_weather_temp_layer = text_layer_create(GRect(5, 23, 25, 20)); // GRect(98, 4, 47, 40)
+	text_layer_set_text_alignment(text_weather_temp_layer, GTextAlignmentCenter);
+	text_layer_set_text_color(text_weather_temp_layer, GColorWhite);
+	text_layer_set_background_color(text_weather_temp_layer, GColorClear);
+	text_layer_set_font(text_weather_temp_layer, fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD));
+	layer_add_child(weather_layer, text_layer_get_layer(text_weather_temp_layer));
+	text_layer_set_text(text_weather_temp_layer, "-°"); 	
 	
 	//init layers for time and date and status
-	text_layer_init(&text_date_layer, window.layer.frame);
-	text_layer_set_text_alignment(&text_date_layer, GTextAlignmentLeft);
-	text_layer_set_text_color(&text_date_layer, GColorWhite);
-	text_layer_set_background_color(&text_date_layer, GColorClear);
-	layer_set_frame(&text_date_layer.layer, GRect(6, 48, 50, 30));
-	//text_layer_set_font(&text_date_layer, fonts_load_custom_font(resource_get_handle(RESOURCE_ID_FONT_ROBOTO_CONDENSED_21)));
-	text_layer_set_font(&text_date_layer, fonts_get_system_font(FONT_KEY_GOTHIC_18));
-	layer_add_child(&window.layer, &text_date_layer.layer);
+	text_date_layer = text_layer_create(bounds);
+	text_layer_set_text_alignment(text_date_layer, GTextAlignmentLeft);
+	text_layer_set_text_color(text_date_layer, GColorWhite);
+	text_layer_set_background_color(text_date_layer, GColorClear);
+	layer_set_frame(text_layer_get_layer(text_date_layer), GRect(6, 48, 50, 30));
+	//text_layer_set_font(text_date_layer, fonts_load_custom_font(resource_get_handle(RESOURCE_ID_FONT_ROBOTO_CONDENSED_21)));
+	text_layer_set_font(text_date_layer, fonts_get_system_font(FONT_KEY_GOTHIC_18));
+	layer_add_child(window_layer, text_layer_get_layer(text_date_layer));
 
 
-	text_layer_init(&text_time_layer, window.layer.frame);
-	text_layer_set_text_alignment(&text_time_layer, GTextAlignmentCenter);
-	text_layer_set_text_color(&text_time_layer, GColorWhite);
-	text_layer_set_background_color(&text_time_layer, GColorClear);
-	layer_set_frame(&text_time_layer.layer, GRect(0, -5, 144, 50));
-	text_layer_set_font(&text_time_layer, fonts_load_custom_font(resource_get_handle(RESOURCE_ID_FONT_ROBOTO_BOLD_SUBSET_49)));
-	layer_add_child(&window.layer, &text_time_layer.layer);
+	text_time_layer = text_layer_create(bounds);
+	text_layer_set_text_alignment(text_time_layer, GTextAlignmentCenter);
+	text_layer_set_text_color(text_time_layer, GColorWhite);
+	text_layer_set_background_color(text_time_layer, GColorClear);
+	layer_set_frame(text_layer_get_layer(text_time_layer), GRect(0, -5, 144, 50));
+	text_layer_set_font(text_time_layer, fonts_load_custom_font(resource_get_handle(RESOURCE_ID_FONT_ROBOTO_BOLD_SUBSET_49)));
+	layer_add_child(window_layer, text_layer_get_layer(text_time_layer));
 
-	text_layer_init(&text_status_layer, GRect(52, 51, 45, 20));
-	text_layer_set_text_alignment(&text_status_layer, GTextAlignmentCenter);
-	text_layer_set_text_color(&text_status_layer, GColorWhite);
-	text_layer_set_background_color(&text_status_layer, GColorClear);
-	text_layer_set_font(&text_status_layer, fonts_get_system_font(FONT_KEY_GOTHIC_14));
-	layer_add_child(&window.layer, &text_status_layer.layer);
-	text_layer_set_text(&text_status_layer, "Init.");
+	text_status_layer = text_layer_create(GRect(52, 51, 45, 20));
+	text_layer_set_text_alignment(text_status_layer, GTextAlignmentCenter);
+	text_layer_set_text_color(text_status_layer, GColorWhite);
+	text_layer_set_background_color(text_status_layer, GColorClear);
+	text_layer_set_font(text_status_layer, fonts_get_system_font(FONT_KEY_GOTHIC_14));
+	layer_add_child(window_layer, text_layer_get_layer(text_status_layer));
+	text_layer_set_text(text_status_layer, "Init.");
 
 
 	//init calendar layer
-	layer_init(&calendar_layer, GRect(0, 124, 144, 45));
-	layer_add_child(&window.layer, &calendar_layer);
+	calendar_layer = layer_create(GRect(0, 124, 144, 45));
+	layer_add_child(window_layer, calendar_layer);
 	
-	text_layer_init(&calendar_date_layer, GRect(6, 0, 132, 21));
-	text_layer_set_text_alignment(&calendar_date_layer, GTextAlignmentLeft);
-	text_layer_set_text_color(&calendar_date_layer, GColorWhite);
-	text_layer_set_background_color(&calendar_date_layer, GColorClear);
-	text_layer_set_font(&calendar_date_layer, fonts_get_system_font(FONT_KEY_GOTHIC_18));
-	layer_add_child(&calendar_layer, &calendar_date_layer.layer);
-	text_layer_set_text(&calendar_date_layer, "No Upcoming"); 	
+	calendar_date_layer = text_layer_create(GRect(6, 0, 132, 21));
+	text_layer_set_text_alignment(calendar_date_layer, GTextAlignmentLeft);
+	text_layer_set_text_color(calendar_date_layer, GColorWhite);
+	text_layer_set_background_color(calendar_date_layer, GColorClear);
+	text_layer_set_font(calendar_date_layer, fonts_get_system_font(FONT_KEY_GOTHIC_18));
+	layer_add_child(calendar_layer, text_layer_get_layer(calendar_date_layer));
+	text_layer_set_text(calendar_date_layer, "No Upcoming"); 	
 
 
-	text_layer_init(&calendar_text_layer, GRect(6, 15, 132, 29));
-	text_layer_set_text_alignment(&calendar_text_layer, GTextAlignmentLeft);
-	text_layer_set_text_color(&calendar_text_layer, GColorWhite);
-	text_layer_set_background_color(&calendar_text_layer, GColorClear);
-	text_layer_set_font(&calendar_text_layer, fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD));
-	layer_add_child(&calendar_layer, &calendar_text_layer.layer);
-	text_layer_set_text(&calendar_text_layer, "Appointment");
+	calendar_text_layer = text_layer_create(GRect(6, 15, 132, 29));
+	text_layer_set_text_alignment(calendar_text_layer, GTextAlignmentLeft);
+	text_layer_set_text_color(calendar_text_layer, GColorWhite);
+	text_layer_set_background_color(calendar_text_layer, GColorClear);
+	text_layer_set_font(calendar_text_layer, fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD));
+	layer_add_child(calendar_layer, text_layer_get_layer(calendar_text_layer));
+	text_layer_set_text(calendar_text_layer, "Appointment");
 	
 	
 	
 	//init music layer
-	layer_init(&animated_layer[MUSIC_LAYER], GRect(144, 72, 75, 50));
-	layer_add_child(&window.layer, &animated_layer[MUSIC_LAYER]);
+	animated_layer[MUSIC_LAYER] = layer_create(GRect(144, 72, 75, 50));
+	layer_add_child(window_layer, animated_layer[MUSIC_LAYER]);
 	
-	text_layer_init(&music_artist_layer, GRect(0, 0, 75, 24));
-	text_layer_set_text_alignment(&music_artist_layer, GTextAlignmentCenter);
-	text_layer_set_text_color(&music_artist_layer, GColorWhite);
-	text_layer_set_background_color(&music_artist_layer, GColorClear);
-	text_layer_set_font(&music_artist_layer, fonts_get_system_font(FONT_KEY_GOTHIC_14));
-	layer_add_child(&animated_layer[MUSIC_LAYER], &music_artist_layer.layer);
-	text_layer_set_text(&music_artist_layer, "No Artist"); 	
+	music_artist_layer = text_layer_create(GRect(0, 0, 75, 24));
+	text_layer_set_text_alignment(music_artist_layer, GTextAlignmentCenter);
+	text_layer_set_text_color(music_artist_layer, GColorWhite);
+	text_layer_set_background_color(music_artist_layer, GColorClear);
+	text_layer_set_font(music_artist_layer, fonts_get_system_font(FONT_KEY_GOTHIC_14));
+	layer_add_child(animated_layer[MUSIC_LAYER], text_layer_get_layer(music_artist_layer));
+	text_layer_set_text(music_artist_layer, "No Artist"); 	
 
 
-	text_layer_init(&music_song_layer, GRect(0, 25, 75, 25));
-	text_layer_set_text_alignment(&music_song_layer, GTextAlignmentCenter);
-	text_layer_set_text_color(&music_song_layer, GColorWhite);
-	text_layer_set_background_color(&music_song_layer, GColorClear);
-	text_layer_set_font(&music_song_layer, fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD));
-	layer_add_child(&animated_layer[MUSIC_LAYER], &music_song_layer.layer);
-	text_layer_set_text(&music_song_layer, "No Title");
+	music_song_layer = text_layer_create(GRect(0, 25, 75, 25));
+	text_layer_set_text_alignment(music_song_layer, GTextAlignmentCenter);
+	text_layer_set_text_color(music_song_layer, GColorWhite);
+	text_layer_set_background_color(music_song_layer, GColorClear);
+	text_layer_set_font(music_song_layer, fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD));
+	layer_add_child(animated_layer[MUSIC_LAYER], text_layer_get_layer(music_song_layer));
+	text_layer_set_text(music_song_layer, "No Title");
 	
 	
 	//init location layer
-	layer_init(&animated_layer[LOCATION_LAYER], GRect(30, 72, 75, 50));
-	layer_add_child(&window.layer, &animated_layer[LOCATION_LAYER]);
+	animated_layer[LOCATION_LAYER] = layer_create(GRect(30, 72, 75, 50));
+	layer_add_child(window_layer, animated_layer[LOCATION_LAYER]);
 	
-	text_layer_init(&location_street_layer, GRect(0, 0, 75, 47));
-	text_layer_set_text_alignment(&location_street_layer, GTextAlignmentCenter);
-	text_layer_set_text_color(&location_street_layer, GColorWhite);
-	text_layer_set_background_color(&location_street_layer, GColorClear);
-	text_layer_set_font(&location_street_layer, fonts_get_system_font(FONT_KEY_GOTHIC_14));
-	layer_add_child(&animated_layer[LOCATION_LAYER], &location_street_layer.layer);
-	text_layer_set_text(&location_street_layer, "Location not updated"); 	
-
-
-	window_set_click_config_provider(&window, (ClickConfigProvider) config_provider);
+	location_street_layer = text_layer_create(GRect(0, 0, 75, 47));
+	text_layer_set_text_alignment(location_street_layer, GTextAlignmentCenter);
+	text_layer_set_text_color(location_street_layer, GColorWhite);
+	text_layer_set_background_color(location_street_layer, GColorClear);
+	text_layer_set_font(location_street_layer, fonts_get_system_font(FONT_KEY_GOTHIC_14));
+	layer_add_child(animated_layer[LOCATION_LAYER], text_layer_get_layer(location_street_layer));
+	text_layer_set_text(location_street_layer, "Location not updated"); 	
 
 	active_layer = LOCATION_LAYER;
 	
-	timerUpdateWeatherForecast = app_timer_send_event(g_app_context, 5000 /* milliseconds */, 5);
+	timerUpdateWeatherForecast = app_timer_register(5000, timer_cbk_nextdayweather, NULL);
+
+	text_layer_set_text(text_status_layer, "Hello");
+	
+	sendCommandInt(SM_SCREEN_ENTER_KEY, STATUS_SCREEN_APP);
+
+	// Start UI timers	
+	timerSwapBottomLayer = app_timer_register(SWAP_BOTTOM_LAYER_INTERVAL, timer_cbk_layerswap, NULL);
+	timerUpdateGps = app_timer_register(updateGPSInterval, timer_cbk_gps, NULL);
+	timerUpdateMusic = app_timer_register(DEFAULT_SONG_UPDATE_INTERVAL, timer_cbk_music, NULL);
 }
 
 
 
-void handle_minute_tick(AppContextRef ctx, PebbleTickEvent *t) {
+void handle_minute_tick(struct tm* tick_time, TimeUnits units_changed) {
 /* Display the time */
-	(void)ctx;
-
   	static char time_text[] = "00:00";
   	static char date_text[] = "Xxxxxxxxx 00";
 
   	char *time_format;
 	
-  	string_format_time(date_text, sizeof(date_text), "%b %e", t->tick_time);
-  	text_layer_set_text(&text_date_layer, date_text);
+  	strftime(date_text, sizeof(date_text), "%b %e", tick_time);
+  	text_layer_set_text(text_date_layer, date_text);
 
 
 	if (clock_is_24h_style()) {
@@ -729,92 +684,105 @@ void handle_minute_tick(AppContextRef ctx, PebbleTickEvent *t) {
     	time_format = "%I:%M";
 	}
 
-	string_format_time(time_text, sizeof(time_text), time_format, t->tick_time);
+	strftime(time_text, sizeof(time_text), time_format, tick_time);
 
   	if (!clock_is_24h_style() && (time_text[0] == '0')) {
     	memmove(time_text, &time_text[1], sizeof(time_text) - 1);
 	}
 
-  	text_layer_set_text(&text_time_layer, time_text);
+  	text_layer_set_text(text_time_layer, time_text);
 	
 	apptDisplay();
 }
 
-void handle_deinit(AppContextRef ctx) {
-  (void)ctx;
-
+void window_unload(Window *this) {
+	// Release resources
 	for (int8_t i=0; i<NUM_WEATHER_IMAGES; i++) {
-	  	heap_bitmap_deinit(&weather_status_small_imgs[i]);
+		gbitmap_destroy(weather_status_small_imgs[i]);
 	}
+	gbitmap_destroy(battery_image);
+
+	text_layer_set_text(text_status_layer, "Bye");
+	
+	// Notify iPhone App
+	sendCommandInt(SM_SCREEN_EXIT_KEY, STATUS_SCREEN_APP);
+	
+	// Cancel all running timers
+	app_timer_cancel(timerUpdateCalendar);
+	app_timer_cancel(timerUpdateMusic);
+	app_timer_cancel(timerUpdateWeather);
+	app_timer_cancel(timerSwapBottomLayer);
+	app_timer_cancel(timerUpdateGps);
+	
+	// Clean up UI elements
+	layer_destroy(battery_layer);
+	bitmap_layer_destroy(battery_image_layer);
+	layer_destroy(battery_ind_layer);
+	layer_destroy(weather_layer);
+	bitmap_layer_destroy(weather_image);
+	bitmap_layer_destroy(weather_tomorrow_image);
+	text_layer_destroy(text_weather_tomorrow_temp_layer);
+	text_layer_destroy(text_weather_temp_layer);
+	text_layer_destroy(text_date_layer);
+	text_layer_destroy(text_time_layer);
+	text_layer_destroy(text_status_layer);
+	layer_destroy(calendar_layer);
+	text_layer_destroy(calendar_date_layer);
+	text_layer_destroy(calendar_text_layer);
+	layer_destroy(animated_layer[MUSIC_LAYER]);
+	text_layer_destroy(music_artist_layer);
+	text_layer_destroy(music_song_layer);
+	layer_destroy(animated_layer[LOCATION_LAYER]);
+	text_layer_destroy(location_street_layer);
 }
 
+// App startup
+static void do_init(void) {
+	// Subscribe to required services
+	tick_timer_service_subscribe(MINUTE_UNIT, &handle_minute_tick);
 
-void handle_timer(AppContextRef ctx, AppTimerHandle handle, uint32_t cookie) {
-  (void)ctx;
-  (void)handle;
+	// Create app's base window
+	window = window_create();
+	window_set_window_handlers(window, (WindowHandlers) {
+		.load = window_load,
+		.unload = window_unload,
+	});
+	window_set_click_config_provider(window, (ClickConfigProvider) config_provider);
 
-/* Request new data from the phone once the timers expire */
-	if (cookie == TIMER_COOKIE_WEATHER) {
-		sendCommandInt(SM_SCREEN_ENTER_KEY, WEATHER_APP);
-		sendCommand(SM_STATUS_UPD_WEATHER_KEY);	
-	}
-	if (cookie == TIMER_COOKIE_CALANDAR) {
-		sendCommand(SM_STATUS_UPD_CAL_KEY);	
-	}
+	// Initialize messaging
+	app_message_register_inbox_received(rcv);
+	app_message_register_inbox_dropped(dropped);
+	app_message_register_outbox_sent(sent_ok);
+	app_message_register_outbox_failed(send_failed);
+	const uint32_t inbound_size = 256;
+	const uint32_t outbound_size = 256;
+	app_message_open(inbound_size, outbound_size);
 
-	if (cookie == TIMER_COOKIE_MUSIC) {
-		sendCommand(SM_SONG_LENGTH_KEY);	
-	}
+	// Push the main window onto the stack
+	const bool animated = true;
+	window_set_fullscreen(window, true);
+	window_stack_push(window, animated);
+	window_set_background_color(window, GColorBlack);
 
-	if (cookie == TIMER_COOKIE_LAYERSWAP) {
-		swap_bottom_layer();	
-
-		timerSwapBottomLayer = app_timer_send_event(g_app_context, SWAP_BOTTOM_LAYER_INTERVAL, TIMER_COOKIE_LAYERSWAP);
-	}
-	
-	if (cookie == TIMER_COOKIE_NEXTDAYWEATHER) {
-		apptDisplay();
-		sendCommandInt(SM_SCREEN_ENTER_KEY, WEATHER_APP);
-		sendCommand(SM_STATUS_UPD_WEATHER_KEY);	
-	}
-		
-	if (cookie == TIMER_COOKIE_GPS) {
-		timerUpdateGps = 0;
-
-		inGPSUpdate = 1;
-		sendCommandInt(SM_SCREEN_ENTER_KEY, GPS_APP);
-		
-		timerUpdateGps = app_timer_send_event(g_app_context, updateGPSInterval, TIMER_COOKIE_GPS);
-	}
-	
-	if (cookie == TIMER_COOKIE_CONNECTIONRECOVER) {
-		sendCommandInt(SM_SCREEN_ENTER_KEY, STATUS_SCREEN_APP);
-	}
+	// Init global variables
+	appointment_time[0] = '\0';
 }
 
-void pbl_main(void *params) {
+// Release resources
+static void do_deinit(void) {
+	// Unsubscribe services
+	tick_timer_service_unsubscribe();
+	
+	// Deregister messaging callbacks
+	app_message_deregister_callbacks();
 
-  PebbleAppHandlers handlers = {
-    .init_handler = &handle_init,
-    .deinit_handler = &handle_deinit,
-	.messaging_info = {
-		.buffer_sizes = {
-			.inbound = 124,
-			.outbound = 32
-		},
-		.default_callbacks.callbacks = {
-			.out_sent = sent_ok,
-			.out_failed = send_failed,
-			.in_received = rcv,
-			.in_dropped = dropped
-		}
-	},
-	.tick_info = {
-	  .tick_handler = &handle_minute_tick,
-	  .tick_units = MINUTE_UNIT
-	},
-    .timer_handler = &handle_timer,
+	// Release windows
+	window_destroy(window);
+}
 
-  };
-  app_event_loop(params, &handlers);
+// The main event/run loop for our app
+int main(void) {
+  do_init();
+  app_event_loop();
+  do_deinit();
 }
