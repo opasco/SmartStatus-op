@@ -16,6 +16,16 @@
         "media": [
             {
                 "type": "png",
+                "name": "PEBBLE_ICON",
+                "file": "images/pebbleicon.png"
+            },
+            {
+                "type": "png",
+                "name": "PHONE_ICON",
+                "file": "images/phoneicon.png"
+            },
+            {
+                "type": "png",
                 "name": "IMAGE_BATTERY",
                 "file": "images/battery.png"
             },

@@ -4,6 +4,7 @@
 
 #define MAX(a, b) (((a) < (b)) ? (b) : (a))
 
+#define DEBUG 0
 #define STRING_LENGTH 255
 #define NUM_WEATHER_IMAGES	8
 #define SWAP_BOTTOM_LAYER_INTERVAL 15000
@@ -35,6 +36,7 @@ void up_single_click_handler(ClickRecognizerRef recognizer, void *context);
 void down_single_click_handler(ClickRecognizerRef recognizer, void *context);
 void config_provider();
 void battery_layer_update_callback(Layer *me, GContext* ctx);
+void pebble_battery_layer_update_callback(Layer *me, GContext* ctx);
 void handle_status_appear(Window *window);
 void handle_status_disappear(Window *window);
 void handle_minute_tick(struct tm* tick_time, TimeUnits units_changed);
@@ -46,6 +48,7 @@ static PropertyAnimation *ani_out, *ani_in;
 
 static Layer *animated_layer[NUM_LAYERS], *weather_layer;
 static Layer *battery_layer, *battery_ind_layer, *calendar_layer;
+static Layer *pebble_battery_layer, *pebble_battery_ind_layer;
 
 static TextLayer *text_date_layer, *text_time_layer;
 
@@ -53,23 +56,27 @@ static TextLayer *text_weather_cond_layer, *text_weather_temp_layer, *text_weath
 static TextLayer *calendar_date_layer, *calendar_text_layer, *text_status_layer;
 static TextLayer *music_artist_layer, *music_song_layer, *location_street_layer;
  
-static BitmapLayer *background_image, *weather_image, *weather_tomorrow_image, *battery_image_layer;
+static BitmapLayer *background_image, *weather_image, *weather_tomorrow_image;
+static BitmapLayer *battery_image_layer, *pebble_battery_image_layer;
+static BitmapLayer *phone_icon_layer, *pebble_icon_layer;
 
 static int32_t active_layer;
 static int32_t updateGPSInterval = GPS_UPDATE_INTERVAL;
 static bool connected = 0;
 static int8_t inTimeOut = 0;
 static bool inGPSUpdate = 0;
+static bool sending = 0;
+static int8_t current_app = -1;
 
 static char string_buffer[STRING_LENGTH], location_street_str[STRING_LENGTH], appointment_time[15];
 static char weather_cond_str[STRING_LENGTH], weather_tomorrow_temp_str[STRING_LENGTH], weather_temp_str[5];
-static int32_t weather_img, weather_tomorrow_img, batteryPercent;
+static int32_t weather_img, weather_tomorrow_img, batteryPercent, pebble_batteryPercent;
 
 static char calendar_date_str[STRING_LENGTH], calendar_text_str[STRING_LENGTH];
 static char music_artist_str[STRING_LENGTH], music_title_str[STRING_LENGTH];
 
 
-GBitmap *battery_image;
+GBitmap *battery_image, *pebble_battery_image, *phone_icon, *pebble_icon;
 GBitmap *weather_status_small_imgs[NUM_WEATHER_IMAGES];
 
 static AppTimer *timerUpdateCalendar = NULL;
@@ -152,7 +159,8 @@ static void apptDisplay() {
 	strftime(date_time_for_appt, sizeof(date_time_for_appt), "%m/%d", t);
 	
 	if(strncmp(date_time_for_appt, appointment_time, 5) != 0) {
-		layer_set_hidden(calendar_layer, 1);
+		text_layer_set_text(calendar_date_layer, appointment_time);
+		layer_set_hidden(calendar_layer, 0);
 		return;
 	}
 
@@ -196,7 +204,8 @@ AppMessageResult sm_message_out_get(DictionaryIterator **iter_out) {
     if(s_sequence_number == 0xFFFFFFFF) {
         s_sequence_number = 1;
     }
-	text_layer_set_text(text_status_layer, "Send.");
+	if(DEBUG)
+		text_layer_set_text(text_status_layer, "Send.");
     return APP_MSG_OK;
 }
 
@@ -210,60 +219,83 @@ void reset_sequence_number() {
 
 
 void sendCommand(int key) {
-	DictionaryIterator* iterout;
+	if(sending == 1) return;
+
+	DictionaryIterator* iterout = NULL;
 	sm_message_out_get(&iterout);
     if(!iterout) return;
 	
-	dict_write_int8(iterout, key, -1);
+	if(dict_write_int8(iterout, key, -1) != DICT_OK) return;
+	sending = 1;
 	app_message_outbox_send();
 }
 
 
 void sendCommandInt(int key, int param) {
-	DictionaryIterator* iterout;
+	if(sending == 1) return;
+
+	DictionaryIterator* iterout = NULL;
 	sm_message_out_get(&iterout);
     if(!iterout) return;
 	
-	dict_write_int8(iterout, key, param);
+	if(dict_write_int8(iterout, key, param) != DICT_OK) return;
+	sending = 1;
 	app_message_outbox_send();
 }
 
 // Timer callbacks
 void timer_cbk_weather() {
-	sendCommandInt(SM_SCREEN_ENTER_KEY, WEATHER_APP);
-	sendCommand(SM_STATUS_UPD_WEATHER_KEY);	
+	if(current_app != STATUS_SCREEN_APP)
+		sendCommandInt(SM_SCREEN_ENTER_KEY, WEATHER_APP);
+	else
+		sendCommand(SM_STATUS_UPD_WEATHER_KEY);	
 }
 		
 void timer_cbk_calandar() {
-	sendCommand(SM_STATUS_UPD_CAL_KEY);	
+	if(current_app != STATUS_SCREEN_APP)
+		sendCommandInt(SM_SCREEN_ENTER_KEY, STATUS_SCREEN_APP);
+	else
+		sendCommand(SM_STATUS_UPD_CAL_KEY);	
 }
 
 void timer_cbk_music() {
-	sendCommand(SM_SONG_LENGTH_KEY);	
+	if(current_app != STATUS_SCREEN_APP)
+		sendCommandInt(SM_SCREEN_ENTER_KEY, STATUS_SCREEN_APP);
+	else
+		sendCommand(SM_SONG_LENGTH_KEY);	
 }
 
 void timer_cbk_layerswap() {
 	swap_bottom_layer();	
 
+	if(timerSwapBottomLayer) {
+		app_timer_cancel(timerSwapBottomLayer);
+		timerSwapBottomLayer = NULL;
+	}
 	timerSwapBottomLayer = app_timer_register(SWAP_BOTTOM_LAYER_INTERVAL, timer_cbk_layerswap, NULL);
 }
 	
 void timer_cbk_nextdayweather() {
 	apptDisplay();
-	sendCommandInt(SM_SCREEN_ENTER_KEY, WEATHER_APP);
-	sendCommand(SM_STATUS_UPD_WEATHER_KEY);	
+	if(current_app != WEATHER_APP)
+		sendCommandInt(SM_SCREEN_ENTER_KEY, WEATHER_APP);
+	else
+		sendCommand(SM_STATUS_UPD_WEATHER_KEY);	
 }
 		
 void timer_cbk_gps() {
-	timerUpdateGps = 0;
-
-	inGPSUpdate = 1;
-	sendCommandInt(SM_SCREEN_ENTER_KEY, GPS_APP);
+	if(current_app != GPS_APP)
+		sendCommandInt(SM_SCREEN_ENTER_KEY, GPS_APP);
 		
+	if(timerUpdateGps) {
+		app_timer_cancel(timerUpdateGps);
+		timerUpdateGps = NULL;
+	}
 	timerUpdateGps = app_timer_register(updateGPSInterval, timer_cbk_gps, NULL);
 }
 	
 void timer_cbk_connectionrecover() {
+	reset_sequence_number();
 	sendCommandInt(SM_SCREEN_ENTER_KEY, STATUS_SCREEN_APP);
 }
 
@@ -280,15 +312,6 @@ void rcv(DictionaryIterator *received, void *context) {
 		batteryPercent = t->value->uint8;
 		layer_mark_dirty(battery_ind_layer);
 	}
-
-	/*
-	t=dict_find(received, SM_WEATHER_COND_KEY); 
-	if (t!=NULL) {
-		memcpy(weather_cond_str, t->value->cstring, MAX(strlen(t->value->cstring), STRING_LENGTH - 1));
-        weather_cond_str[strlen(t->value->cstring)] = '\0';
-		text_layer_set_text(text_weather_cond_layer, weather_cond_str); 	
-	}
-	*/
 
 	t=dict_find(received, SM_WEATHER_TEMP_KEY); 
 	if (t!=NULL) {
@@ -312,8 +335,6 @@ void rcv(DictionaryIterator *received, void *context) {
 		memcpy(weather_tomorrow_temp_str, t->value->cstring + 6, strlen(t->value->cstring));
         weather_tomorrow_temp_str[strlen(t->value->cstring)] = '\0';
 		text_layer_set_text(text_weather_tomorrow_temp_layer, weather_tomorrow_temp_str); 	
-
-		sendCommandInt(SM_SCREEN_ENTER_KEY, STATUS_SCREEN_APP);
 	}
 
 	t=dict_find(received, SM_UPDATE_INTERVAL_KEY); 
@@ -329,8 +350,6 @@ void rcv(DictionaryIterator *received, void *context) {
 		memcpy(location_street_str, t->value->cstring, strlen(t->value->cstring));
         location_street_str[strlen(t->value->cstring)] = '\0';
 		text_layer_set_text(location_street_layer, location_street_str);
-		
-		sendCommandInt(SM_SCREEN_ENTER_KEY, STATUS_SCREEN_APP);
 	}
 
 	t=dict_find(received, SM_STATUS_CAL_TIME_KEY); 
@@ -374,7 +393,10 @@ void rcv(DictionaryIterator *received, void *context) {
 	if (t!=NULL) {
 		interval = t->value->int32 * 1000;
 
-		app_timer_cancel(timerUpdateWeather);
+		if(timerUpdateWeather) {
+			app_timer_cancel(timerUpdateWeather);
+			timerUpdateWeather = NULL;
+		}
 		timerUpdateWeather = app_timer_register(interval, timer_cbk_weather, NULL);
 	}
 
@@ -382,7 +404,10 @@ void rcv(DictionaryIterator *received, void *context) {
 	if (t!=NULL) {
 		interval = t->value->int32 * 1000;
 
-		app_timer_cancel(timerUpdateCalendar);
+		if(timerUpdateCalendar) {
+			app_timer_cancel(timerUpdateCalendar);
+			timerUpdateCalendar = NULL;
+		}
 		timerUpdateCalendar = app_timer_register(interval, timer_cbk_calandar, NULL);
 	}
 
@@ -390,9 +415,16 @@ void rcv(DictionaryIterator *received, void *context) {
 	if (t!=NULL) {
 		interval = t->value->int32 * 1000;
 
-		app_timer_cancel(timerUpdateMusic);
+		if(timerUpdateMusic) {
+			app_timer_cancel(timerUpdateMusic);
+			timerUpdateMusic = NULL;
+		}
 		timerUpdateMusic = app_timer_register(interval, timer_cbk_music, NULL);
 	}
+	
+	if(!DEBUG)
+		text_layer_set_text(text_status_layer, "");
+
 }
 
 void dropped(AppMessageResult reason, void *context){
@@ -408,16 +440,29 @@ void dropped(AppMessageResult reason, void *context){
 	}
 	
 	connected = 0;
+
+	if(timerRecoveryAttempt) {
+		app_timer_cancel(timerRecoveryAttempt);
+		timerRecoveryAttempt = NULL;
+	}
 	timerRecoveryAttempt = app_timer_register(RECOVERY_ATTEMPT_INTERVAL, timer_cbk_connectionrecover, NULL);
 }
 
 void sent_ok(DictionaryIterator *sent, void *context) {
-	text_layer_set_text(text_status_layer, "Ok");
+	Tuple *t;
+	t = dict_find(sent, SM_SCREEN_ENTER_KEY); 
+	if(t) current_app = t->value->int8;
+
+	sending = 0;
+	if(DEBUG)
+		text_layer_set_text(text_status_layer, "Ok");
+	
 	connected = 1;
 	inTimeOut = 0;
 }
 
 void send_failed(DictionaryIterator *failed, AppMessageResult reason, void *context) {
+	sending = 0;
 	text_layer_set_text(text_status_layer, "Err.");
 	
 	if(reason == APP_MSG_NOT_CONNECTED) {
@@ -446,6 +491,11 @@ void send_failed(DictionaryIterator *failed, AppMessageResult reason, void *cont
 	}
 	
 	connected = 0;
+
+	if(timerRecoveryAttempt) {
+		app_timer_cancel(timerRecoveryAttempt);
+		timerRecoveryAttempt = NULL;
+	}
 	timerRecoveryAttempt = app_timer_register(RECOVERY_ATTEMPT_INTERVAL, timer_cbk_connectionrecover, NULL);
 }
 
@@ -496,20 +546,28 @@ void config_provider() {
 
 
 void battery_layer_update_callback(Layer *me, GContext* ctx) {
-	
 	//draw the remaining battery percentage
 	graphics_context_set_stroke_color(ctx, GColorBlack);
 	graphics_context_set_fill_color(ctx, GColorWhite);
 
 	graphics_fill_rect(ctx, GRect(2+16-(int)((batteryPercent/100.0)*16.0), 2, (int)((batteryPercent/100.0)*16.0), 8), 0, GCornerNone);
 	
+	if(batteryPercent < 20) vibes_double_pulse();
+}
+
+void pebble_battery_layer_update_callback(Layer *me, GContext* ctx) {
+	//draw the remaining battery percentage
+	graphics_context_set_stroke_color(ctx, GColorBlack);
+	graphics_context_set_fill_color(ctx, GColorWhite);
+
+	graphics_fill_rect(ctx, GRect(2+16-(int)((pebble_batteryPercent/100.0)*16.0), 2, (int)((pebble_batteryPercent/100.0)*16.0), 8), 0, GCornerNone);
+	
+	if(pebble_batteryPercent < 20) vibes_double_pulse();
 }
 
 void window_load(Window *this) {
 	Layer *window_layer = window_get_root_layer(this);
 	GRect bounds = layer_get_bounds(window_layer);
-
-	//resource_init_current_app(&APP_RESOURCES);
 
 	//init weather images
 	for (int8_t i=0; i<NUM_WEATHER_IMAGES; i++) {
@@ -521,10 +579,16 @@ void window_load(Window *this) {
 	layer_add_child(window_layer, battery_layer);
 
 	battery_image = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_BATTERY);
+	phone_icon = gbitmap_create_with_resource(RESOURCE_ID_PHONE_ICON);
+	pebble_icon = gbitmap_create_with_resource(RESOURCE_ID_PEBBLE_ICON);
 
 	battery_image_layer = bitmap_layer_create(GRect(12, 8, 23, 14));
 	layer_add_child(battery_layer, bitmap_layer_get_layer(battery_image_layer));
 	bitmap_layer_set_bitmap(battery_image_layer, battery_image);
+	
+	phone_icon_layer = bitmap_layer_create(GRect(-5, 5, 20, 20));
+	layer_add_child(battery_layer, bitmap_layer_get_layer(phone_icon_layer));
+	bitmap_layer_set_bitmap(phone_icon_layer, phone_icon);
 
 	battery_ind_layer = layer_create(GRect(14, 9, 19, 11));
 	layer_set_update_proc(battery_ind_layer, battery_layer_update_callback);
@@ -533,8 +597,29 @@ void window_load(Window *this) {
 	batteryPercent = 100;
 	layer_mark_dirty(battery_ind_layer);
 
+	// init Pebble battery layer
+	pebble_battery_layer = layer_create(GRect(-5, 45, 49, 45));
+	layer_add_child(window_layer, pebble_battery_layer);
+
+	pebble_battery_image = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_BATTERY);
+
+	pebble_battery_image_layer = bitmap_layer_create(GRect(12, 8, 23, 14));
+	layer_add_child(pebble_battery_layer, bitmap_layer_get_layer(pebble_battery_image_layer));
+	bitmap_layer_set_bitmap(pebble_battery_image_layer, pebble_battery_image);
+
+	pebble_icon_layer = bitmap_layer_create(GRect(31, 5, 20, 20));
+	layer_add_child(pebble_battery_layer, bitmap_layer_get_layer(pebble_icon_layer));
+	bitmap_layer_set_bitmap(pebble_icon_layer, pebble_icon);
+
+	pebble_battery_ind_layer = layer_create(GRect(14, 9, 19, 11));
+	layer_set_update_proc(pebble_battery_ind_layer, pebble_battery_layer_update_callback);
+	layer_add_child(pebble_battery_layer, pebble_battery_ind_layer);
+
+	pebble_batteryPercent = 100;
+	layer_mark_dirty(pebble_battery_ind_layer);
+	
 	//init weather layer and add weather image, weather condition, temperature
-	weather_layer = layer_create(GRect(0, 78, 144, 45));
+	weather_layer = layer_create(GRect(0, 70, 144, 45));
 	layer_add_child(window_layer, weather_layer);
 
 
@@ -571,7 +656,7 @@ void window_load(Window *this) {
 	text_layer_set_text_alignment(text_date_layer, GTextAlignmentLeft);
 	text_layer_set_text_color(text_date_layer, GColorWhite);
 	text_layer_set_background_color(text_date_layer, GColorClear);
-	layer_set_frame(text_layer_get_layer(text_date_layer), GRect(6, 48, 50, 30));
+	layer_set_frame(text_layer_get_layer(text_date_layer), GRect(47, 48, 50, 30));
 	//text_layer_set_font(text_date_layer, fonts_load_custom_font(resource_get_handle(RESOURCE_ID_FONT_ROBOTO_CONDENSED_21)));
 	text_layer_set_font(text_date_layer, fonts_get_system_font(FONT_KEY_GOTHIC_18));
 	layer_add_child(window_layer, text_layer_get_layer(text_date_layer));
@@ -585,8 +670,8 @@ void window_load(Window *this) {
 	text_layer_set_font(text_time_layer, fonts_load_custom_font(resource_get_handle(RESOURCE_ID_FONT_ROBOTO_BOLD_SUBSET_49)));
 	layer_add_child(window_layer, text_layer_get_layer(text_time_layer));
 
-	text_status_layer = text_layer_create(GRect(52, 51, 45, 20));
-	text_layer_set_text_alignment(text_status_layer, GTextAlignmentCenter);
+	text_status_layer = text_layer_create(GRect(6, 110, 45, 20));
+	text_layer_set_text_alignment(text_status_layer, GTextAlignmentLeft);
 	text_layer_set_text_color(text_status_layer, GColorWhite);
 	text_layer_set_background_color(text_status_layer, GColorClear);
 	text_layer_set_font(text_status_layer, fonts_get_system_font(FONT_KEY_GOTHIC_14));
@@ -655,7 +740,8 @@ void window_load(Window *this) {
 	
 	timerUpdateWeatherForecast = app_timer_register(5000, timer_cbk_nextdayweather, NULL);
 
-	text_layer_set_text(text_status_layer, "Hello");
+	if(DEBUG)
+		text_layer_set_text(text_status_layer, "Hello");
 	
 	sendCommandInt(SM_SCREEN_ENTER_KEY, STATUS_SCREEN_APP);
 
@@ -665,7 +751,10 @@ void window_load(Window *this) {
 	timerUpdateMusic = app_timer_register(DEFAULT_SONG_UPDATE_INTERVAL, timer_cbk_music, NULL);
 }
 
-
+void pebble_battery_update(BatteryChargeState pb_bat) {
+	pebble_batteryPercent = pb_bat.charge_percent;
+	layer_mark_dirty(pebble_battery_layer);
+}
 
 void handle_minute_tick(struct tm* tick_time, TimeUnits units_changed) {
 /* Display the time */
@@ -702,17 +791,33 @@ void window_unload(Window *this) {
 	}
 	gbitmap_destroy(battery_image);
 
-	text_layer_set_text(text_status_layer, "Bye");
+	if(DEBUG)
+		text_layer_set_text(text_status_layer, "Bye");
 	
 	// Notify iPhone App
 	sendCommandInt(SM_SCREEN_EXIT_KEY, STATUS_SCREEN_APP);
 	
 	// Cancel all running timers
-	app_timer_cancel(timerUpdateCalendar);
-	app_timer_cancel(timerUpdateMusic);
-	app_timer_cancel(timerUpdateWeather);
-	app_timer_cancel(timerSwapBottomLayer);
-	app_timer_cancel(timerUpdateGps);
+	if(timerUpdateCalendar) {
+		app_timer_cancel(timerUpdateCalendar);
+		timerUpdateCalendar = NULL;
+	}
+	if(timerUpdateCalendar) {
+		app_timer_cancel(timerUpdateMusic);
+		timerUpdateCalendar = NULL;
+	}
+	if(timerUpdateCalendar) {
+		app_timer_cancel(timerUpdateWeather);
+		timerUpdateCalendar = NULL;
+	}
+	if(timerUpdateCalendar) {
+		app_timer_cancel(timerSwapBottomLayer);
+		timerUpdateCalendar = NULL;
+	}
+	if(timerUpdateCalendar) {
+		app_timer_cancel(timerUpdateGps);
+		timerUpdateCalendar = NULL;
+	}
 	
 	// Clean up UI elements
 	layer_destroy(battery_layer);
@@ -740,6 +845,8 @@ void window_unload(Window *this) {
 static void do_init(void) {
 	// Subscribe to required services
 	tick_timer_service_subscribe(MINUTE_UNIT, &handle_minute_tick);
+	battery_state_service_subscribe(pebble_battery_update);
+
 
 	// Create app's base window
 	window = window_create();
@@ -754,8 +861,8 @@ static void do_init(void) {
 	app_message_register_inbox_dropped(dropped);
 	app_message_register_outbox_sent(sent_ok);
 	app_message_register_outbox_failed(send_failed);
-	const uint32_t inbound_size = 256;
-	const uint32_t outbound_size = 256;
+	const uint32_t inbound_size = app_message_inbox_size_maximum();
+	const uint32_t outbound_size = app_message_outbox_size_maximum();
 	app_message_open(inbound_size, outbound_size);
 
 	// Push the main window onto the stack
@@ -772,6 +879,7 @@ static void do_init(void) {
 static void do_deinit(void) {
 	// Unsubscribe services
 	tick_timer_service_unsubscribe();
+	battery_state_service_unsubscribe();
 	
 	// Deregister messaging callbacks
 	app_message_deregister_callbacks();
