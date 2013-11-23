@@ -23,69 +23,69 @@
 typedef enum {MUSIC_LAYER, LOCATION_LAYER, NUM_LAYERS} AnimatedLayers;
 
 
-AppMessageResult sm_message_out_get(DictionaryIterator **iter_out);
-void reset_sequence_number();
+static AppMessageResult sm_message_out_get(DictionaryIterator **iter_out);
+static void reset_sequence_number();
 
-void sendCommand(int key);
-void sendCommandInt(int key, int param);
-void rcv(DictionaryIterator *received, void *context);
-void dropped(AppMessageResult reason, void *context);
-void select_up_handler(ClickRecognizerRef recognizer, void *context);
-void select_down_handler(ClickRecognizerRef recognizer, void *context);
-void up_single_click_handler(ClickRecognizerRef recognizer, void *context);
-void down_single_click_handler(ClickRecognizerRef recognizer, void *context);
-void config_provider();
-void battery_layer_update_callback(Layer *me, GContext* ctx);
-void pebble_battery_layer_update_callback(Layer *me, GContext* ctx);
-void handle_status_appear(Window *window);
-void handle_status_disappear(Window *window);
-void handle_minute_tick(struct tm* tick_time, TimeUnits units_changed);
-void reset();	
-void swap_bottom_layer();
+static void sendCommand(int key);
+static void sendCommandInt(int key, int param);
+static void rcv(DictionaryIterator *received, void *context);
+static void dropped(AppMessageResult reason, void *context);
+static void select_up_handler(ClickRecognizerRef recognizer, void *context);
+static void select_down_handler(ClickRecognizerRef recognizer, void *context);
+static void up_single_click_handler(ClickRecognizerRef recognizer, void *context);
+static void down_single_click_handler(ClickRecognizerRef recognizer, void *context);
+static void config_provider();
+static void battery_layer_update_callback(Layer *me, GContext* ctx);
+static void pebble_battery_layer_update_callback(Layer *me, GContext* ctx);
+static void handle_status_appear(Window *window);
+static void handle_status_disappear(Window *window);
+static void handle_minute_tick(struct tm* tick_time, TimeUnits units_changed);
+static void reset();	
+static void swap_bottom_layer();
 	
-Window *window;
-PropertyAnimation *ani_out, *ani_in;
+static Window *window;
+static PropertyAnimation *ani_out, *ani_in;
 
-Layer *animated_layer[NUM_LAYERS], *weather_layer;
-Layer *battery_layer, *battery_ind_layer, *calendar_layer;
-Layer *pebble_battery_layer, *pebble_battery_ind_layer;
+static Layer *animated_layer[NUM_LAYERS], *weather_layer;
+static Layer *battery_layer, *battery_ind_layer, *calendar_layer;
+static Layer *pebble_battery_layer, *pebble_battery_ind_layer;
 
-TextLayer *text_date_layer, *text_time_layer;
+static TextLayer *text_date_layer, *text_time_layer;
 
-TextLayer *text_weather_cond_layer, *text_weather_temp_layer, *text_weather_tomorrow_temp_layer, *text_battery_layer;
-TextLayer *calendar_date_layer, *calendar_text_layer, *text_status_layer;
-TextLayer *music_artist_layer, *music_song_layer, *location_street_layer;
+static TextLayer *text_weather_temp_layer, *text_weather_tomorrow_temp_layer, *text_battery_layer;
+static TextLayer *calendar_date_layer, *calendar_text_layer, *text_status_layer;
+static TextLayer *music_artist_layer, *music_song_layer, *location_street_layer;
  
-BitmapLayer *background_image, *weather_image, *weather_tomorrow_image;
-BitmapLayer *battery_image_layer, *pebble_battery_image_layer;
-BitmapLayer *phone_icon_layer, *pebble_icon_layer;
+static BitmapLayer *background_image, *weather_image, *weather_tomorrow_image;
+static BitmapLayer *battery_image_layer, *pebble_battery_image_layer;
+static BitmapLayer *phone_icon_layer, *pebble_icon_layer;
 
-int32_t active_layer;
-int32_t updateGPSInterval = GPS_UPDATE_INTERVAL;
-bool connected = 0;
-int8_t inTimeOut = 0;
-bool inGPSUpdate = 0;
-bool sending = 0;
-int8_t current_app = -1;
+static int32_t active_layer;
+static int32_t updateGPSInterval = GPS_UPDATE_INTERVAL;
+static bool connected = 0;
+static int8_t inTimeOut = 0;
+static bool inGPSUpdate = 0;
+static bool sending = 0;
+static int8_t current_app = -1;
 
-char string_buffer[STRING_LENGTH], location_street_str[STRING_LENGTH], appointment_time[15];
-char weather_cond_str[STRING_LENGTH], weather_tomorrow_temp_str[5], weather_temp_str[5];
-int32_t weather_img, weather_tomorrow_img, batteryPercent, pebble_batteryPercent;
+static char string_buffer[STRING_LENGTH], location_street_str[STRING_LENGTH], appointment_time[15];
+static char weather_cond_str[STRING_LENGTH], weather_tomorrow_temp_str[5], weather_temp_str[5];
+static int32_t weather_img, weather_tomorrow_img, batteryPercent, pebble_batteryPercent;
 
-char calendar_date_str[STRING_LENGTH], calendar_text_str[STRING_LENGTH];
-char music_artist_str[STRING_LENGTH], music_title_str[STRING_LENGTH];
+static char calendar_date_str[STRING_LENGTH], calendar_text_str[STRING_LENGTH];
+static char music_artist_str[STRING_LENGTH], music_title_str[STRING_LENGTH];
 
 
-GBitmap *battery_image, *pebble_battery_image, *phone_icon, *pebble_icon;
-GBitmap *weather_status_small_imgs[NUM_WEATHER_IMAGES];
+static GBitmap *battery_image, *pebble_battery_image, *phone_icon, *pebble_icon;
+static GBitmap *weather_status_small_imgs[NUM_WEATHER_IMAGES];
 
-AppTimer *timerUpdateCalendar = NULL;
-AppTimer *timerUpdateWeather = NULL;
-AppTimer *timerUpdateMusic = NULL;
-AppTimer *timerSwapBottomLayer = NULL;
-AppTimer *timerUpdateWeatherForecast = NULL;
-AppTimer *timerUpdateGps = NULL;
-AppTimer *timerRecoveryAttempt = NULL;
+static AppTimer *timerUpdateCalendar = NULL;
+static AppTimer *timerUpdateWeather = NULL;
+static AppTimer *timerUpdateMusic = NULL;
+static AppTimer *timerSwapBottomLayer = NULL;
+static AppTimer *timerUpdateWeatherForecast = NULL;
+static AppTimer *timerUpdateGps = NULL;
+static AppTimer *timerRecoveryAttempt = NULL;
 
 const int WEATHER_SMALL_IMG_IDS[] = {
   RESOURCE_ID_IMAGE_SUN_SMALL,
@@ -100,10 +100,10 @@ const int WEATHER_SMALL_IMG_IDS[] = {
 
 
 
-uint32_t s_sequence_number = 0xFFFFFFFE;
+static uint32_t s_sequence_number = 0xFFFFFFFE;
 
 /* Convert letter to digit */
-int letter2digit(char letter) {
+static int letter2digit(char letter) {
 	if((letter >= 48) && (letter <=57)) {
 		return letter - 48;
 	}
@@ -112,7 +112,7 @@ int letter2digit(char letter) {
 }
 
 /* Convert string to number */
-int string2number(char *string) {
+static int string2number(char *string) {
 	int32_t result = 0;
 	int32_t offset;
 	int32_t digit = -1;
@@ -133,7 +133,7 @@ int string2number(char *string) {
 }
 
 /* Convert time string ("HH:MM") to number of minutes */
-int timestr2minutes(char *timestr) {
+static int timestr2minutes(char *timestr) {
 	static char hourStr[3], minStr[3];
 	int32_t hour, min;
 	int8_t hDigits = 2;
@@ -208,7 +208,7 @@ static void apptDisplay() {
 	layer_set_hidden(calendar_layer, 0);
 }
  
-AppMessageResult sm_message_out_get(DictionaryIterator **iter_out) {
+static AppMessageResult sm_message_out_get(DictionaryIterator **iter_out) {
     AppMessageResult result = app_message_outbox_begin(iter_out);
     if(result != APP_MSG_OK) return result;
     dict_write_int32(*iter_out, SM_SEQUENCE_NUMBER_KEY, ++s_sequence_number);
@@ -220,7 +220,7 @@ AppMessageResult sm_message_out_get(DictionaryIterator **iter_out) {
     return APP_MSG_OK;
 }
 
-void reset_sequence_number() {
+static void reset_sequence_number() {
 	if(!bluetooth_connection_service_peek()) return;
 	
     DictionaryIterator *iter = NULL;
@@ -231,7 +231,7 @@ void reset_sequence_number() {
 }
 
 
-void sendCommand(int key) {
+static void sendCommand(int key) {
 	if(!bluetooth_connection_service_peek()) return;
 
 	if(sending == 1) return;
@@ -246,7 +246,7 @@ void sendCommand(int key) {
 }
 
 
-void sendCommandInt(int key, int param) {
+static void sendCommandInt(int key, int param) {
 	if(sending == 1) return;
 
 	DictionaryIterator* iterout = NULL;
@@ -259,7 +259,7 @@ void sendCommandInt(int key, int param) {
 }
 
 // Timer callbacks
-void timer_cbk_weather() {
+static void timer_cbk_weather() {
 	if(timerUpdateWeather) {
 		app_timer_cancel(timerUpdateWeather);
 		timerUpdateWeather = NULL;
@@ -271,7 +271,7 @@ void timer_cbk_weather() {
 		sendCommand(SM_STATUS_UPD_WEATHER_KEY);	
 }
 		
-void timer_cbk_calandar() {
+static void timer_cbk_calandar() {
 	if(timerUpdateCalendar) {
 		app_timer_cancel(timerUpdateCalendar);
 		timerUpdateCalendar = NULL;
@@ -283,7 +283,7 @@ void timer_cbk_calandar() {
 		sendCommand(SM_STATUS_UPD_CAL_KEY);	
 }
 
-void timer_cbk_music() {
+static void timer_cbk_music() {
 	if(timerUpdateMusic) {
 		app_timer_cancel(timerUpdateMusic);
 		timerUpdateMusic = NULL;
@@ -295,7 +295,7 @@ void timer_cbk_music() {
 		sendCommand(SM_SONG_LENGTH_KEY);	
 }
 
-void timer_cbk_layerswap() {
+static void timer_cbk_layerswap() {
 	swap_bottom_layer();	
 
 	if(timerSwapBottomLayer) {
@@ -305,19 +305,18 @@ void timer_cbk_layerswap() {
 	timerSwapBottomLayer = app_timer_register(SWAP_BOTTOM_LAYER_INTERVAL, timer_cbk_layerswap, NULL);
 }
 	
-void timer_cbk_nextdayweather() {
+static void timer_cbk_nextdayweather() {
 	if(timerUpdateWeatherForecast) {
 		app_timer_cancel(timerUpdateWeatherForecast);
 		timerUpdateWeatherForecast = NULL;
 	}
-
 	if(current_app != WEATHER_APP)
 		sendCommandInt(SM_SCREEN_ENTER_KEY, WEATHER_APP);
 	else
 		sendCommand(SM_STATUS_UPD_WEATHER_KEY);	
 }
 		
-void timer_cbk_gps() {
+static void timer_cbk_gps() {
 	if(current_app != GPS_APP)
 		sendCommandInt(SM_SCREEN_ENTER_KEY, GPS_APP);
 		
@@ -328,12 +327,12 @@ void timer_cbk_gps() {
 	timerUpdateGps = app_timer_register(updateGPSInterval, timer_cbk_gps, NULL);
 }
 	
-void timer_cbk_connectionrecover() {
+static void timer_cbk_connectionrecover() {
 	reset_sequence_number();
 	sendCommandInt(SM_SCREEN_ENTER_KEY, STATUS_SCREEN_APP);
 }
 
-void rcv(DictionaryIterator *received, void *context) {
+static void rcv(DictionaryIterator *received, void *context) {
 	// Got a message callback
 	Tuple *t;
 	int8_t interval;
@@ -341,7 +340,6 @@ void rcv(DictionaryIterator *received, void *context) {
 	connected = 1;
 
 	t = dict_find(received, SM_COUNT_BATTERY_KEY); 
-	
 	if (t!=NULL) {
 		batteryPercent = t->value->uint8;
 		layer_mark_dirty(battery_ind_layer);
@@ -368,8 +366,8 @@ void rcv(DictionaryIterator *received, void *context) {
 	t=dict_find(received, SM_WEATHER_DAY1_KEY); 
 	if (t!=NULL) {
 		memcpy(weather_tomorrow_temp_str, t->value->cstring + 6,
-			   MAX(sizeof(weather_tomorrow_temp_str), strlen(t->value->cstring)));
-        weather_tomorrow_temp_str[strlen(t->value->cstring)] = '\0';
+			   MAX(sizeof(weather_tomorrow_temp_str), strlen(t->value->cstring) - 6));
+        weather_tomorrow_temp_str[strlen(t->value->cstring) - 6] = '\0';
 		text_layer_set_text(text_weather_tomorrow_temp_layer, weather_tomorrow_temp_str); 	
 	}
 
@@ -468,7 +466,7 @@ void rcv(DictionaryIterator *received, void *context) {
 
 }
 
-void dropped(AppMessageResult reason, void *context){
+static void dropped(AppMessageResult reason, void *context){
 	// DO SOMETHING WITH THE DROPPED REASON / DISPLAY AN ERROR / RESEND 
 	text_layer_set_text(text_status_layer, "Drop.");
 	
@@ -489,7 +487,7 @@ void dropped(AppMessageResult reason, void *context){
 	timerRecoveryAttempt = app_timer_register(RECOVERY_ATTEMPT_INTERVAL, timer_cbk_connectionrecover, NULL);
 }
 
-void sent_ok(DictionaryIterator *sent, void *context) {
+static void sent_ok(DictionaryIterator *sent, void *context) {
 	Tuple *t;
 	
 	if(timerRecoveryAttempt) {
@@ -508,7 +506,7 @@ void sent_ok(DictionaryIterator *sent, void *context) {
 	inTimeOut = 0;
 }
 
-void send_failed(DictionaryIterator *failed, AppMessageResult reason, void *context) {
+static void send_failed(DictionaryIterator *failed, AppMessageResult reason, void *context) {
 	sending = 0;
 	text_layer_set_text(text_status_layer, "Err.");
 	
@@ -547,23 +545,23 @@ void send_failed(DictionaryIterator *failed, AppMessageResult reason, void *cont
 }
 
 
-void select_single_click_handler(ClickRecognizerRef recognizer, void *context) {
+static void select_single_click_handler(ClickRecognizerRef recognizer, void *context) {
 	sendCommand(SM_PLAYPAUSE_KEY);
 }
 
-void select_long_click_handler(ClickRecognizerRef recognizer, void *context) {
+static void select_long_click_handler(ClickRecognizerRef recognizer, void *context) {
 	sendCommand(SM_FIND_MY_PHONE_KEY);
 }
 
-void select_up_handler(ClickRecognizerRef recognizer, void *context) {
+static void select_up_handler(ClickRecognizerRef recognizer, void *context) {
 }
 
 
-void select_down_handler(ClickRecognizerRef recognizer, void *context) {
+static void select_down_handler(ClickRecognizerRef recognizer, void *context) {
 }
 
 
-void up_single_click_handler(ClickRecognizerRef recognizer, void *context) {
+static void up_single_click_handler(ClickRecognizerRef recognizer, void *context) {
 	sendCommand(SM_VOLUME_UP_KEY);
 }
 
@@ -571,10 +569,7 @@ void down_single_click_handler(ClickRecognizerRef recognizer, void *context) {
 	sendCommand(SM_VOLUME_DOWN_KEY);
 }
 
-void swap_bottom_layer() {
-	return;
-	//on a press of the bottom button, scroll in the next layer
-
+static void swap_bottom_layer() {
 	ani_out = property_animation_create_layer_frame(animated_layer[active_layer], &GRect(30, 72, 75, 50), &GRect(-75, 72, 75, 50));
 	animation_schedule(&(ani_out->animation));
 
@@ -585,7 +580,7 @@ void swap_bottom_layer() {
 }
 
 
-void config_provider() {
+static void config_provider() {
   window_single_click_subscribe(BUTTON_ID_SELECT, select_single_click_handler);
   window_long_click_subscribe(BUTTON_ID_SELECT, 0, select_long_click_handler, NULL);
   window_single_click_subscribe(BUTTON_ID_UP, up_single_click_handler);
@@ -593,27 +588,23 @@ void config_provider() {
 }
 
 
-void battery_layer_update_callback(Layer *me, GContext* ctx) {
+static void battery_layer_update_callback(Layer *me, GContext* ctx) {
 	//draw the remaining battery percentage
 	graphics_context_set_stroke_color(ctx, GColorBlack);
 	graphics_context_set_fill_color(ctx, GColorWhite);
 
 	graphics_fill_rect(ctx, GRect(2+16-(int)((batteryPercent/100.0)*16.0), 2, (int)((batteryPercent/100.0)*16.0), 8), 0, GCornerNone);
-	
-	if(batteryPercent < 20) vibes_double_pulse();
 }
 
-void pebble_battery_layer_update_callback(Layer *me, GContext* ctx) {
+static void pebble_battery_layer_update_callback(Layer *me, GContext* ctx) {
 	//draw the remaining battery percentage
 	graphics_context_set_stroke_color(ctx, GColorBlack);
 	graphics_context_set_fill_color(ctx, GColorWhite);
 
 	graphics_fill_rect(ctx, GRect(2+16-(int)((pebble_batteryPercent/100.0)*16.0), 2, (int)((pebble_batteryPercent/100.0)*16.0), 8), 0, GCornerNone);
-	
-	if(pebble_batteryPercent < 20) vibes_double_pulse();
 }
 
-void window_load(Window *this) {
+static void window_load(Window *this) {
 	Layer *window_layer = window_get_root_layer(this);
 	GRect bounds = layer_get_bounds(window_layer);
 
@@ -800,13 +791,14 @@ void window_load(Window *this) {
 	timerUpdateMusic = app_timer_register(DEFAULT_SONG_UPDATE_INTERVAL, timer_cbk_music, NULL);
 }
 
-void pebble_battery_update(BatteryChargeState pb_bat) {
+static void pebble_battery_update(BatteryChargeState pb_bat) {
 	pebble_batteryPercent = pb_bat.charge_percent;
 	layer_mark_dirty(pebble_battery_layer);
 }
 
-void bluetooth_connection_handler(bool btConnected) {
+static void bluetooth_connection_handler(bool btConnected) {
 	if(btConnected) {
+		text_layer_set_text(text_status_layer, "");
 		sendCommandInt(SM_SCREEN_ENTER_KEY, STATUS_SCREEN_APP);
 		
 		if(!timerSwapBottomLayer)
@@ -817,6 +809,8 @@ void bluetooth_connection_handler(bool btConnected) {
 			timerUpdateMusic = app_timer_register(DEFAULT_SONG_UPDATE_INTERVAL, timer_cbk_music, NULL);
 
 	} else {
+		text_layer_set_text(text_status_layer, "No BT");
+		
 		// Cancel all running timers
 		if(timerUpdateCalendar) {
 			app_timer_cancel(timerUpdateCalendar);
@@ -849,7 +843,7 @@ void bluetooth_connection_handler(bool btConnected) {
 	}
 }
 
-void handle_minute_tick(struct tm* tick_time, TimeUnits units_changed) {
+static void handle_minute_tick(struct tm* tick_time, TimeUnits units_changed) {
 /* Display the time */
   	static char time_text[] = "00:00";
   	static char date_text[] = "Xxxxxxxxx 00";
@@ -873,7 +867,7 @@ void handle_minute_tick(struct tm* tick_time, TimeUnits units_changed) {
 	apptDisplay();
 }
 
-void window_unload(Window *this) {
+static void window_unload(Window *this) {
 	if(DEBUG)
 		text_layer_set_text(text_status_layer, "Bye");
 	
@@ -943,11 +937,6 @@ void window_unload(Window *this) {
 
 // App startup
 static void do_init(void) {
-	// Subscribe to required services
-	tick_timer_service_subscribe(MINUTE_UNIT, &handle_minute_tick);
-	battery_state_service_subscribe(pebble_battery_update);
-	bluetooth_connection_service_subscribe(bluetooth_connection_handler);
-
 	// Create app's base window
 	window = window_create();
 	window_set_window_handlers(window, (WindowHandlers) {
@@ -955,6 +944,11 @@ static void do_init(void) {
 		.unload = window_unload,
 	});
 	window_set_click_config_provider(window, (ClickConfigProvider) config_provider);
+
+	// Subscribe to required services
+	tick_timer_service_subscribe(MINUTE_UNIT, handle_minute_tick);
+	battery_state_service_subscribe(pebble_battery_update);
+	bluetooth_connection_service_subscribe(bluetooth_connection_handler);
 
 	// Initialize messaging
 	app_message_register_inbox_received(rcv);
