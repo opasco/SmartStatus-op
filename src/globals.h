@@ -83,7 +83,7 @@
 
 typedef enum {CALENDAR_APP, MUSIC_APP, GPS_APP, STOCKS_APP, BITCOIN_APP, CAMERA_APP, WEATHER_APP, URL_APP, FINDPHONE_APP, REMINDERS_APP, STATUS_SCREEN_APP} AppIDs;
 
-static char *app_names[] = {"Calendar", "Music", "GPS", "Stocks", "Bitcoin", "Camera", "Weather", "HTTP Request", "Find My Phone", "Reminders"};
+char *app_names[] = {"Calendar", "Music", "GPS", "Stocks", "Bitcoin", "Camera", "Weather", "HTTP Request", "Find My Phone", "Reminders"};
 
 
 #endif
