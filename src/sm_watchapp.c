@@ -110,7 +110,6 @@ static char local_debug_str[STRING_LENGTH];
 	do { \
 		snprintf(local_debug_str, STRING_LENGTH, format, ## __VA_ARGS__); \
 		text_layer_set_text(text_status_layer, local_debug_str); \
-		light_enable_interaction(); \
 	   } while(0)
 
 static uint32_t s_sequence_number = 0xFFFFFFFE;
@@ -126,12 +125,13 @@ static int letter2digit(char letter) {
 
 /* Convert string to number */
 static int32_t string2number(char *string) {
-	int32_t result = 0;
+	int32_t result;
 	int32_t offset;
 	int32_t digit = -1;
 	int32_t unit = 1;
 	int8_t letter;
 
+	result = 0;
 	offset = strlen(string) - 1;
 
 	for(unit = 1, result = 0; offset >= 0; unit = unit * 10) {
@@ -150,14 +150,18 @@ static int32_t timestr2minutes(char *timestr) {
 	static char hourStr[] = "00";
 	static char minStr[] = "00";
 	int32_t hour, min;
-	int8_t hDigits = 2;
+	int8_t hDigits;
 
+	hour = -1;
+	min = -1;
+	
 	//if(DEBUG)
 		//LOCAL_DEBUG(APP_LOG_LEVEL_DEBUG, "timestr2minutes %s", timestr);
-	if(timestr[1] == ':') hDigits = 1;
+	if(timestr[1] == ':') hDigits = 1; else hDigits = 2;
 	
 	strncpy(hourStr, timestr, hDigits);
-	strncpy(minStr, timestr+hDigits+1, 2);
+	hourStr[hDigits] = '\0';
+	strncpy(minStr, timestr + hDigits + 1, 2);
 	
 	hour = string2number(hourStr);
 	if(hour < 0) return -1;
@@ -839,7 +843,7 @@ static void window_load(Window *this) {
 	text_layer_set_background_color(calendar_text_layer, GColorClear);
 	text_layer_set_font(calendar_text_layer, fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD));
 	layer_add_child(calendar_layer, text_layer_get_layer(calendar_text_layer));
-	text_layer_set_text(calendar_text_layer, "Appointment");
+	text_layer_set_text(calendar_text_layer, "");
 	
 	
 	
